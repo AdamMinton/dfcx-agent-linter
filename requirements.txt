@@ -1,0 +1,8 @@
+streamlit
+google-cloud-dialogflow-cx
+google-auth
+pandas
+# cxlint is not on PyPI, installing from git as per instructions
+git+https://github.com/GoogleCloudPlatform/cxlint.git
+rich
+google-cloud-storage
