@@ -248,6 +248,168 @@ class OfflineFlowGraph:
                     })
         return issues
 
+    def is_input_page(self, flow_id: str, page_id: str) -> bool:
+        """Checks if a page waits for user input (has intents or form parameters)."""
+        if page_id == "Start":
+            # Start page of a flow *can* be an input page if it has intents in transition routes
+            # But usually we treat it as a starting point. 
+            # The notebook says: "Start page isn't treated as a page... input_page_ids.append(None)"
+            # But then it checks intents.
+            flow_data = self.flows.get(flow_id)
+            if not flow_data: return False
+            # Check transition routes for intents
+            for route in flow_data.get("transitionRoutes", []):
+                if route.get("intent"): return True
+            # Check TRGs
+            for trg_ref in flow_data.get("transitionRouteGroups", []):
+                trg = self.resolve_trg(flow_id, trg_ref)
+                if trg:
+                    for route in trg.get("transitionRoutes", []):
+                        if route.get("intent"): return True
+            return False
+
+        page_data = self.pages.get(flow_id, {}).get(page_id)
+        if not page_data: return False
+        
+        # Check form parameters
+        if page_data.get("form", {}).get("parameters"):
+            return True
+            
+        # Check transition routes for intents
+        for route in page_data.get("transitionRoutes", []):
+            if route.get("intent"): return True
+            
+        # Check TRGs
+        for trg_ref in page_data.get("transitionRouteGroups", []):
+            trg = self.resolve_trg(flow_id, trg_ref)
+            if trg:
+                for route in trg.get("transitionRoutes", []):
+                    if route.get("intent"): return True
+                    
+        return False
+
+    def has_entry_fulfillment(self, flow_id: str, page_id: str) -> bool:
+        if page_id == "Start":
+            return False # Start page usually doesn't have entry fulfillment in the same way, or we ignore it for loops
+        
+        page_data = self.pages.get(flow_id, {}).get(page_id)
+        if not page_data: return False
+        
+        ef = page_data.get("entryFulfillment", {})
+        return bool(ef.get("messages") or ef.get("webhook"))
+
+    def detect_possible_loops(self, threshold: int = 25) -> List[Dict]:
+        issues = []
+        
+        for flow_id, flow_data in self.flows.items():
+            # Get all input pages
+            input_pages = [] # (page_id, page_name)
+            
+            # Add Start page if it acts as input or just as a root
+            # The notebook adds 'Start' explicitly.
+            input_pages.append(("Start", "Start"))
+            
+            for page_id, page_data in self.pages.get(flow_id, {}).items():
+                if self.is_input_page(flow_id, page_id):
+                    input_pages.append((page_id, page_data.get("displayName", page_id)))
+            
+            for start_page_id, start_page_name in input_pages:
+                self.detect_loops_rec(
+                    flow_id=flow_id,
+                    current_page_id=start_page_id,
+                    current_page_name=start_page_name,
+                    transition_count=0,
+                    path=[],
+                    issues=issues,
+                    threshold=threshold,
+                    visited_in_path=set()
+                )
+                
+        return issues
+
+    def detect_loops_rec(self, flow_id, current_page_id, current_page_name, transition_count, path, issues, threshold, visited_in_path):
+        # Add current to path
+        new_path = path + [current_page_name]
+        
+        # Check routes
+        routes = []
+        
+        # Get routes based on page type
+        if current_page_id == "Start":
+            flow_data = self.flows.get(flow_id)
+            if flow_data:
+                routes.extend(flow_data.get("transitionRoutes", []))
+                for trg_ref in flow_data.get("transitionRouteGroups", []):
+                    trg = self.resolve_trg(flow_id, trg_ref)
+                    if trg: routes.extend(trg.get("transitionRoutes", []))
+                routes.extend(flow_data.get("eventHandlers", []))
+        else:
+            page_data = self.pages.get(flow_id, {}).get(current_page_id)
+            if page_data:
+                routes.extend(page_data.get("transitionRoutes", []))
+                for trg_ref in page_data.get("transitionRouteGroups", []):
+                    trg = self.resolve_trg(flow_id, trg_ref)
+                    if trg: routes.extend(trg.get("transitionRoutes", []))
+                routes.extend(page_data.get("eventHandlers", []))
+                # Form reprompt handlers
+                if page_data.get("form"):
+                    for param in page_data["form"].get("parameters", []):
+                        for h in param.get("fillBehavior", {}).get("repromptEventHandlers", []):
+                            routes.append(h)
+
+        for route in routes:
+            target_page_ref = route.get("targetPage")
+            target_flow_ref = route.get("targetFlow")
+            
+            if target_flow_ref:
+                # Transition to another flow - end of loop check for this flow
+                continue
+                
+            if target_page_ref:
+                target_page_id = self.resolve_page_id(flow_id, target_page_ref)
+                if not target_page_id: continue
+                
+                target_page_name = self.get_page_display_name(flow_id, target_page_id)
+                
+                # Determine cost
+                # Notebook: "transition_count_increase = 2 if self.has_entry_fulfillment(target_page_id) else 1"
+                cost = 2 if self.has_entry_fulfillment(flow_id, target_page_id) else 1
+                new_count = transition_count + cost
+                
+                # Check if target is input page or threshold reached
+                is_input = self.is_input_page(flow_id, target_page_id)
+                # has_intent = bool(route.get("intent")) # Removed to allow detecting loops after intent transitions
+                
+                if is_input or new_count >= threshold:
+                    # Base case
+                    if new_count >= threshold:
+                        # Found a long path/loop
+                        issue_msg = f"Possible Infinite Loop (Depth {new_count}): {' -> '.join(new_path + [target_page_name])}"
+                        # Check if we already have this issue to avoid duplicates
+                        if not any(i['Issue'] == issue_msg for i in issues):
+                            issues.append({
+                                "Flow": self.flows[flow_id].get("displayName", flow_id),
+                                "Page": current_page_name,
+                                "Issue": issue_msg,
+                                "Severity": "Warning"
+                            })
+                else:
+                    # Recurse
+                    if target_page_name in new_path:
+                         # It is a loop
+                         issue_msg = f"Infinite Loop Detected: {' -> '.join(new_path + [target_page_name])}"
+                         if not any(i['Issue'] == issue_msg for i in issues):
+                            issues.append({
+                                "Flow": self.flows[flow_id].get("displayName", flow_id),
+                                "Page": current_page_name,
+                                "Issue": issue_msg,
+                                "Severity": "Warning"
+                            })
+                    else:
+                        self.detect_loops_rec(
+                            flow_id, target_page_id, target_page_name, new_count, new_path, issues, threshold, visited_in_path
+                        )
+
 def render_graph_linter(credentials, agent_details):
     st.subheader(f"Graph Linter for: {agent_details['display_name']}")
     
@@ -265,6 +427,7 @@ def render_graph_linter(credentials, agent_details):
                 all_issues.extend(graph.check_missing_event_handlers())
                 all_issues.extend(graph.check_stuck_pages())
                 all_issues.extend(graph.check_unused_route_groups())
+                all_issues.extend(graph.detect_possible_loops())
                 
             if all_issues:
                 st.warning(f"Found {len(all_issues)} issues.")

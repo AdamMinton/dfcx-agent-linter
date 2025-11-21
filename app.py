@@ -1,5 +1,5 @@
 import streamlit as st
-from modules import auth, selector, linter, ssml_linter, graph_linter
+from modules import auth, selector, linter, ssml_linter, graph_linter, search_linter
 
 st.set_page_config(page_title="DFCX Agent Linter", layout="wide")
 
@@ -28,7 +28,7 @@ def main():
         # Modules Area
         st.header("2. Run Modules")
         
-        tab1, tab2, tab3 = st.tabs(["CXLint", "SSML Checker", "Graph Linter"])
+        tab1, tab2, tab3, tab4 = st.tabs(["CXLint", "SSML Checker", "Graph Linter", "Search"])
         
         with tab1:
             linter.render_linter(creds, agent_details)
@@ -38,6 +38,9 @@ def main():
 
         with tab3:
             graph_linter.render_graph_linter(creds, agent_details)
+
+        with tab4:
+            search_linter.render_search_linter(creds, agent_details)
 
 if __name__ == "__main__":
     main()
