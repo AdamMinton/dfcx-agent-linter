@@ -10,17 +10,24 @@ from contextlib import redirect_stdout
 from rich.markup import escape
 from cxlint.rules.logger import RulesLogger
 # Monkeypatch generic_logger to escape markup in display names
-# We store the original logger on the class to avoid recursion on reload
+# This is necessary because cxlint uses the 'rich' library for logging, which interprets
+# certain characters (like brackets) as markup tags. DFCX display names often contain
+# these characters, leading to MarkupError if not escaped.
 
 # 1. Check if we already patched it and restore the original if so
+# This prevents recursion errors and ensures we always patch the base method
 if hasattr(RulesLogger, '_original_generic_logger'):
     RulesLogger.generic_logger = RulesLogger._original_generic_logger
 
 # 2. Save the (now guaranteed original) logger
 RulesLogger._original_generic_logger = RulesLogger.generic_logger
 
-def patched_generic_logger_v4(self, resource, rule, message):
-    # Escape display names to prevent markup errors
+def patched_generic_logger(self, resource, rule, message):
+    """
+    Patched logger that escapes display names before logging to prevent Rich MarkupErrors.
+    It also wraps the logging call in a try/except block as a fail-safe.
+    """
+    # Attributes that might contain special characters needing escaping
     attrs_to_escape = [
         'entity_type_display_name',
         'flow_display_name',
@@ -35,18 +42,11 @@ def patched_generic_logger_v4(self, resource, rule, message):
             try:
                 val = getattr(resource, attr)
                 if val is not None and isinstance(val, str):
-                    # Check if it looks like it needs escaping (has brackets)
-                    # But rich.escape is safe to call on already escaped strings usually (it escapes & < > [ ])
-                    # To be safe against double escaping if we re-run on same object:
-                    # We can't easily know if it's already escaped without context.
-                    # But since we restore original logger, we shouldn't be double-patching.
-                    # However, the resource object might be reused? 
-                    # cxlint creates new resource objects in the loop usually.
-                    
+                    # Escape the value to be safe for Rich
                     escaped_val = escape(val)
                     setattr(resource, attr, escaped_val)
-            except Exception as e:
-                print(f"Error processing {attr}: {e}")
+            except Exception:
+                # If escaping fails, we just continue with the original value
                 pass
     
     # Call the original logger stored on the class
@@ -54,12 +54,11 @@ def patched_generic_logger_v4(self, resource, rule, message):
         RulesLogger._original_generic_logger(self, resource, rule, message)
     except Exception as e:
         # If rich fails to render (e.g. MarkupError), fallback to simple print
-        # We reconstruct a simple message without links
+        # We reconstruct a simple message without links to avoid crashing the app
         print(f"Rich logging failed: {e}")
         print(f"{rule} : {message} (Resource: {getattr(resource, 'display_name', 'Unknown')})")
 
-RulesLogger.generic_logger = patched_generic_logger_v4
-print("Applied patched_generic_logger_v4 (Restored & Re-patched)")
+RulesLogger.generic_logger = patched_generic_logger
 
 def export_and_extract_agent(credentials, agent_name):
     """Exports the agent from DFCX and extracts it to a temp directory."""
