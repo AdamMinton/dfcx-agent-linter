@@ -6,3 +6,6 @@ pandas
 git+https://github.com/GoogleCloudPlatform/cxlint.git
 rich
 google-cloud-storage
+dfcx-scrapi
+pandas-gbq
+ratelimit
