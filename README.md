@@ -12,6 +12,7 @@ A composable web application built with Streamlit to run automated tests and lin
     - Naming convention violations
     - Invalid intents in test cases
 - **Rich Reporting**: View detailed linting reports directly within the web interface.
+- **SSML Validation**: Validate SSML in agent responses (Flows, Pages, Routes) to ensure XML correctness and catch unclosed tags.
 
 ## Project Structure
 
@@ -21,7 +22,8 @@ A composable web application built with Streamlit to run automated tests and lin
 ├── modules/               # Application modules
 │   ├── auth.py            # Google Cloud authentication logic
 │   ├── selector.py        # DFCX agent selection widgets
-│   └── linter.py          # cxlint runner and monkeypatches
+│   ├── linter.py          # cxlint runner and monkeypatches
+│   └── ssml_linter.py     # SSML validation module
 ├── requirements.txt       # Python dependencies
 ├── Dockerfile             # Container configuration for Cloud Run
 ├── DEPLOY.md              # Detailed deployment instructions
