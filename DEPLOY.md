@@ -1,5 +1,16 @@
 # Deployment Instructions
 
+## Prerequisites
+
+1.  **GCP Project**: Ensure you have a GCP project (e.g., `att-aam-external`).
+2.  **OAuth Client ID**:
+    *   Go to **APIs & Services > Credentials**.
+    *   Create an **OAuth 2.0 Client ID** (Web application).
+    *   **Authorized Redirect URIs**:
+        *   Local: `http://localhost:8501`
+        *   Cloud Run: `https://<YOUR-SERVICE-NAME>-<HASH>.a.run.app` (Update this after first deploy).
+    *   Download the JSON file and save it as `client_secret.json` in the root of this repository.
+
 ## Local Development
 
 1.  **Install Dependencies**:
@@ -16,15 +27,35 @@
 
 ## Cloud Run Deployment
 
-1.  **Build and Deploy**:
-    Run the following command to deploy to Cloud Run. Replace `REGION` with your preferred region (e.g., `us-central1`).
+### Option 1: Using Cloud Build (Recommended)
 
+This method builds the container and deploys it to Cloud Run.
+
+1.  **Submit Build**:
     ```bash
-    gcloud run deploy dfcx-linter-app \
-      --source . \
-      --project att-aam-external \
-      --region us-central1 \
-      --allow-unauthenticated
+    gcloud builds submit --config cloudbuild.yaml .
     ```
 
-    *Note: Remove `--allow-unauthenticated` if you want to restrict access.*
+2.  **Post-Deployment Configuration**:
+    *   Get the Service URL from the output (e.g., `https://dfcx-linter-app-uc.a.run.app`).
+    *   Go back to **APIs & Services > Credentials** in GCP Console.
+    *   Add the Service URL to the **Authorized Redirect URIs** of your OAuth Client.
+    *   (Optional) Update the `REDIRECT_URI` environment variable in Cloud Run if it differs from the default logic (though the code currently defaults to localhost or tries to infer, setting it explicitly is safer).
+        ```bash
+        gcloud run services update dfcx-linter-app \
+          --update-env-vars REDIRECT_URI=<YOUR_SERVICE_URL> \
+          --region us-central1
+        ```
+
+### Option 2: Manual Gcloud Deploy
+
+```bash
+gcloud run deploy dfcx-linter-app \
+  --source . \
+  --project att-aam-external \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars REDIRECT_URI=https://dfcx-linter-app-uc.a.run.app
+```
+
+*Note: We use `--allow-unauthenticated` because the application handles authentication internally via OAuth.*

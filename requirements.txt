@@ -9,3 +9,4 @@ google-cloud-storage
 dfcx-scrapi
 pandas-gbq
 ratelimit
+google-auth-oauthlib

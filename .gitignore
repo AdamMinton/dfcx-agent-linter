@@ -132,3 +132,4 @@ cython_debug/
 .idea/
 *.swp
 .DS_Store
+client_secret.json
