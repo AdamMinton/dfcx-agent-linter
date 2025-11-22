@@ -18,6 +18,9 @@ A composable web application built with Streamlit to run automated tests and lin
     - Missing event handlers
     - Unused route groups
 - **SSML Validation**: Validate SSML in agent responses (Flows, Pages, Routes) to ensure XML correctness and catch unclosed tags.
+- **Flow Filtering**: All modules now support filtering results by Flow, allowing you to focus on specific parts of your agent.
+- **Test Runner**: Run and analyze test cases with advanced filtering:
+    - **Deep Flow Filtering**: Filter test cases that *touch* a specific flow at any point in the conversation, not just those that start in it.
 
 ## Project Structure
 

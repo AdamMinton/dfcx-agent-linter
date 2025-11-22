@@ -170,28 +170,50 @@ def render_ssml_linter(credentials, agent_details):
             agent_name = agent_details['name']
             
             # Reuse export logic
-            # Note: This might be slow if we export every time. 
-            # Ideally we should cache the export or pass the temp dir if we chain modules.
-            # For now, independent execution is fine.
             temp_dir = linter.export_and_extract_agent(credentials, agent_name)
             st.success("Agent exported successfully.")
             
             with st.spinner("Validating SSML..."):
                 issues = process_agent_files(temp_dir)
-                
-            if issues:
-                st.error(f"Found {len(issues)} SSML issues!")
-                df = pd.DataFrame(issues)
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.success("No SSML issues found! (Checked all <speak> blocks)")
+                st.session_state['ssml_issues'] = issues
                 
             # Cleanup
-            # shutil.rmtree(temp_dir) # linter.export_and_extract_agent doesn't return the cleanup function, so we rely on OS or manual cleanup if we knew the path. 
-            # Actually linter.export_and_extract_agent returns temp_dir. We should clean it up.
             import shutil
             shutil.rmtree(temp_dir)
             
         except Exception as e:
             st.error(f"Error: {e}")
             st.exception(e)
+
+    if 'ssml_issues' in st.session_state:
+        issues = st.session_state['ssml_issues']
+        if issues:
+            st.error(f"Found {len(issues)} SSML issues!")
+            df = pd.DataFrame(issues)
+            
+            # Extract Flow from Location
+            # Location format: Flow(Flow Name).Page(Page Name)...
+            # We can use regex or simple string splitting if consistent
+            import re
+            def extract_flow(loc):
+                match = re.search(r"Flow\((.*?)\)", loc)
+                return match.group(1) if match else "Unknown"
+            
+            df['Flow'] = df['Location'].apply(extract_flow)
+            
+            # Reorder columns to put Flow first
+            cols = ['Flow'] + [c for c in df.columns if c != 'Flow']
+            df = df[cols]
+            
+            # Filter by Flow
+            all_flows = sorted(df['Flow'].unique())
+            selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
+            
+            if selected_flows:
+                filtered_df = df[df['Flow'].isin(selected_flows)]
+                st.dataframe(filtered_df, use_container_width=True)
+            else:
+                st.info("Select flows to view issues.")
+                
+        else:
+            st.success("No SSML issues found! (Checked all <speak> blocks)")

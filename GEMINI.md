@@ -29,3 +29,17 @@ When monkeypatching classes in a Streamlit application, special care must be tak
 -   **Tech Stack**: Streamlit, Google Cloud Run, DFCX API, `cxlint`.
 -   **Key Modules**:
     -   `modules/linter.py`: Contains the `cxlint` runner and all the critical monkeypatches.
+
+## Recent Learnings (Flow Filtering & Test Runner)
+
+1.  **`dfcx_scrapi` vs Raw Client**:
+    -   `dfcx_scrapi.core.test_cases.TestCases.list_test_cases` returns shallow objects (no conversation turns) by default and does not support the `view` parameter.
+    -   To filter test cases by visited pages/flows, we must use the raw `google.cloud.dialogflowcx_v3.TestCasesClient` with `view=TestCaseView.FULL` to fetch conversation turns.
+
+2.  **Streamlit State Persistence**:
+    -   When generating reports via a button click (e.g., "Run CXLint"), results must be stored in `st.session_state`.
+    -   If not persisted, interacting with any subsequent widget (like a filter multiselect) triggers a rerun, resetting the script and clearing the results because the button is no longer "clicked".
+
+3.  **Page ID Mapping**:
+    -   `dfcx_scrapi.core.pages.Pages.get_pages_map` (and `list_pages`) often excludes the special "Start Page" of a flow.
+    -   When building a `Page ID -> Flow Name` map, explicitly add the Start Page (e.g., `.../flows/{flow_id}/pages/Start`) to ensure complete coverage, otherwise test cases landing on the Start Page won't be correctly mapped to the flow.

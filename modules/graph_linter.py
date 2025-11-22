@@ -429,15 +429,31 @@ def render_graph_linter(credentials, agent_details):
                 all_issues.extend(graph.check_unused_route_groups())
                 all_issues.extend(graph.detect_possible_loops())
                 
-            if all_issues:
-                st.warning(f"Found {len(all_issues)} issues.")
-                df = pd.DataFrame(all_issues)
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.success("No graph issues found!")
+                st.session_state['graph_issues'] = all_issues
                 
             shutil.rmtree(temp_dir)
             
         except Exception as e:
             st.error(f"Error: {e}")
             st.exception(e)
+
+    if 'graph_issues' in st.session_state:
+        all_issues = st.session_state['graph_issues']
+        if all_issues:
+            st.warning(f"Found {len(all_issues)} issues.")
+            df = pd.DataFrame(all_issues)
+            
+            # Filter by Flow
+            if 'Flow' in df.columns:
+                all_flows = sorted(df['Flow'].unique())
+                selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
+                
+                if selected_flows:
+                    filtered_df = df[df['Flow'].isin(selected_flows)]
+                    st.dataframe(filtered_df, use_container_width=True)
+                else:
+                    st.info("Select flows to view issues.")
+            else:
+                st.dataframe(df, use_container_width=True)
+        else:
+            st.success("No graph issues found!")

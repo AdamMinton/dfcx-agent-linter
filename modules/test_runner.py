@@ -13,6 +13,7 @@ from dfcx_scrapi.core.flows import Flows
 from dfcx_scrapi.core.pages import Pages
 from dfcx_scrapi.core.agents import Agents
 from dfcx_scrapi.core.test_cases import TestCases
+from google.cloud import dialogflowcx_v3
 from google.cloud import storage
 from google.auth.transport.requests import Request
 from ratelimit import limits, sleep_and_retry
@@ -49,12 +50,9 @@ class CxTestCasesHelper:
         self.dfcx_p = Pages()
         self.dfcx_tc = TestCases()
 
-
-
     def convert_flow(self, flow_id, flows_map):
         if flow_id.split('/')[-1] == '-':
             return ''
-        #flow_id_converted = str(agent_id) + '/flows/' + str(flow_id)
         if flow_id in flows_map.keys():
             return flows_map[flow_id]
         return 'Default Start Flow'
@@ -95,20 +93,49 @@ class CxTestCasesHelper:
     @handle_dfcx_quota
     def get_page(self, dfcx_p, page_id):
         return self.dfcx_p.get_page(page_id=page_id)
-        
+
     @handle_dfcx_quota
     def get_test_case_results(self, retest_all=False, flow_filter=None, tag_filter=None, limit=None, recency_days=None, progress_callback=None):
         '''
-        tcc = TestCasesClient.from_service_account_file(creds_path)
-        request = ListTestCasesRequest(
-            parent=agent_id,
-        )
-        test_cases = tcc.list_test_cases(request=request)
+        Fetches test cases and filters them.
+        If flow_filter is provided, it checks if the test case touches any of the selected flows.
         '''
 
         agent = self.get_agent(agent_id=self.agent_id_full)
         flows_map = self.dfcx_f.get_flows_map(self.agent_id_full)
-        test_cases = self.dfcx_tc.list_test_cases(self.agent_id_full)
+        
+        # Pre-fetch all pages to map Page ID -> Flow Name for deep filtering
+        page_to_flow_map = {}
+        if flow_filter:
+            # We only need this if we are filtering by flow
+            # This might be expensive if there are many flows/pages
+            # But it's necessary to know which flow a page belongs to
+            for flow_id, flow_name in flows_map.items():
+                # We need page IDs. 
+                # dfcx_scrapi get_pages_map returns {page_id: page_name}
+                # We need the reverse or just to know flow_name for a page_id
+                
+                # 1. Add Start Page explicitly (list_pages doesn't return it)
+                start_page_id = f"{flow_id}/pages/Start"
+                page_to_flow_map[start_page_id] = flow_name
+                
+                try:
+                    p_map = self.dfcx_p.get_pages_map(flow_id)
+                    for pid in p_map.keys():
+                        page_to_flow_map[pid] = flow_name
+                except Exception as e:
+                    logging.warning(f"Failed to get pages for flow {flow_name} ({flow_id}): {e}")
+            
+            logging.info(f"Built page_to_flow_map with {len(page_to_flow_map)} entries.")
+
+        # Use raw client to get FULL view (needed for conversation turns)
+        client = dialogflowcx_v3.TestCasesClient(credentials=self.dfcx_tc.creds)
+        request = dialogflowcx_v3.ListTestCasesRequest(
+            parent=self.agent_id_full,
+            view=dialogflowcx_v3.ListTestCasesRequest.TestCaseView.FULL,
+            page_size=20
+        )
+        test_cases = client.list_test_cases(request=request)
         retest = []
         retest_names = []
         results = {}
@@ -128,22 +155,78 @@ class CxTestCasesHelper:
 
         # Filter test cases first if flow_filter is provided
         filtered_test_cases = []
+        
+        # Convert test_cases generator to list if needed, or iterate
+        # list_test_cases returns a List usually
+        
         for response in test_cases:
-            flow_name = self.convert_flow(response.test_config.flow, flows_map)
-            if flow_filter and flow_name not in flow_filter:
-                continue
+            # Flow Filter Logic
+            if flow_filter:
+                include_tc = False
+                
+                # 1. Check Start Flow
+                start_flow_name = self.convert_flow(response.test_config.flow, flows_map)
+                if start_flow_name in flow_filter:
+                    include_tc = True
+                
+                # 2. Check Touched Flows (Deep Filter)
+                if not include_tc:
+                    # Check conversation turns
+                    for turn in response.test_case_conversation_turns:
+                        # Check virtual agent output for current page
+                        if turn.virtual_agent_output and turn.virtual_agent_output.current_page:
+                            page_id = turn.virtual_agent_output.current_page.name
+                            # page_id is full resource name usually
+                            # But get_pages_map usually returns full resource name as key?
+                            # Let's check if we can match it
+                            
+                            # If page_id is in our map, we know the flow
+                            if page_id in page_to_flow_map:
+                                flow_name = page_to_flow_map[page_id]
+                                if flow_name in flow_filter:
+                                    include_tc = True
+                                    break
+                            
+                            # Also check if it's a Flow ID directly (Start Page)
+                            # Sometimes current_page might be the flow start? 
+                            # Actually current_page.name is usually the page resource name.
+                            # If it's the start page, it might be just the flow ID or end with /pages/Start
+                            
+                            # If we can't find it in map, maybe it's a flow start page?
+                            # Flow start page doesn't always show up in get_pages_map
+                            # But usually we can infer flow from the page ID structure?
+                            # projects/.../flows/{flow_id}/pages/{page_id}
+                            # We can extract flow_id from the string
+                            if "flows/" in page_id:
+                                try:
+                                    # Extract flow id
+                                    # .../flows/FLOW_ID/pages/...
+                                    parts = page_id.split('/')
+                                    if 'flows' in parts:
+                                        f_idx = parts.index('flows')
+                                        if f_idx + 1 < len(parts):
+                                            fid = parts[f_idx+1]
+                                            # Reconstruct full flow ID or just match by suffix?
+                                            # flows_map keys are usually full IDs
+                                            # Let's try to find the flow in flows_map
+                                            found_flow = False
+                                            for f_full_id, f_name in flows_map.items():
+                                                if f_full_id.endswith(f"/flows/{fid}"):
+                                                    if f_name in flow_filter:
+                                                        include_tc = True
+                                                        found_flow = True
+                                                    break
+                                            if found_flow:
+                                                break
+                                except:
+                                    pass
+
+                if not include_tc:
+                    continue
             
             # Filter by tags
             if tag_filter:
-                # response.tags is a RepeatedScalarContainer, convert to list
                 tc_tags = list(response.tags)
-                # Check if ANY of the selected tags are present in the test case tags
-                # Or should it be ALL? Usually filters are OR or AND. 
-                # Let's assume if any selected tag is present, we include it (OR logic within tags? or AND?)
-                # User said "Add a filter for tags". 
-                # If I select "Regression", I want to see Regression tests.
-                # If I select "Regression" and "Smoke", I probably want to see tests that are either Regression OR Smoke.
-                # Let's go with intersection > 0.
                 if not set(tag_filter).intersection(set(tc_tags)):
                     continue
 
@@ -164,23 +247,12 @@ class CxTestCasesHelper:
             elif recency_days is not None:
                 # Check if test is too old
                 if response.last_test_result.test_time:
-                    # test_time is a timestamp, need to compare with now
-                    # Assuming test_time is timezone aware if it comes from API, but let's check
-                    # Usually it's a protobuf timestamp or datetime
                     last_run = response.last_test_result.test_time
                     if last_run:
-                        # Ensure both are offset-naive or offset-aware for comparison
-                        # simpler to just use total seconds if possible or convert
-                        # For now assuming standard datetime comparison works or throws
-                        # If last_run is None, it's never run?
-                        pass
-                    
-                    # If we can't easily compare, we might skip or fail. 
-                    # But let's assume standard datetime.
-                    # If last_run is older than recency_days
-                    cutoff = datetime.now(last_run.tzinfo) - timedelta(days=recency_days)
-                    if last_run < cutoff:
-                        should_retest = True
+                        # If last_run is older than recency_days
+                        cutoff = datetime.now(last_run.tzinfo) - timedelta(days=recency_days)
+                        if last_run < cutoff:
+                            should_retest = True
                 else:
                     # Never run
                     should_retest = True
@@ -205,7 +277,6 @@ class CxTestCasesHelper:
             not_runnable.append('UNSPECIFIED' in str(raw_result) or raw_result == 0)
             
             # Generate Deep Link
-            # Format: https://conversational-agents.cloud.google.com/projects/{project}/locations/{location}/agents/{agent}/(testCaseV2s/{test_case_id}/resultV2s//right-panel:simulator)
             link = f"https://conversational-agents.cloud.google.com/projects/{self.agent_project_id}/locations/{self.agent_location_id}/agents/{self.agent_id}/(testCaseV2s/{response.name.split('/')[-1]}/resultV2s//right-panel:simulator)"
             deep_links.append(link)
 
@@ -236,10 +307,6 @@ class CxTestCasesHelper:
             # Batching logic
             batch_size = limit if limit else 20 # Default to 20 if not specified, or user specified limit
             
-            # If limit is None, maybe we shouldn't batch? But API has limits. 
-            # The user asked for "number of concurrent tests to run".
-            # Let's use 'limit' as batch size.
-            
             chunks = [retest[i:i + batch_size] for i in range(0, len(retest), batch_size)]
             total_chunks = len(chunks)
             
@@ -254,14 +321,9 @@ class CxTestCasesHelper:
                     response = self.dfcx_tc.batch_run_test_cases(chunk, self.agent_id_full)
                     for result in response.results:
                         # Results may not be in the same order as they went in (oh well)
-                        # Process the name a bit to remove the /results/id part at the end.
                         testCaseId_full = '/'.join(result.name.split('/')[:-2])
                         
-                        # Find index in retest list to get display name if needed, 
-                        # but we mainly need to update the DF
-                        
                         # Update dataframe where id = testcaseId_full
-                        #row = test_case_df.loc[test_case_df['id'] == testCaseId_full]
                         test_case_df.loc[test_case_df['id'] == testCaseId_full, 'short_id'] = testCaseId_full.split('/')[-1]
                         test_case_df.loc[test_case_df['id'] == testCaseId_full, 'test_result'] = str(result.test_result)
                         test_case_df.loc[test_case_df['id'] == testCaseId_full, 'test_time'] = result.test_time
@@ -274,8 +336,6 @@ class CxTestCasesHelper:
                 except Exception as e:
                     logging.error(f"Error running batch: {e}")
 
-        # This column is redundant, since we have passed (bool)
-        # test_case_df = test_case_df.drop(columns=['test_result']) # Keep for debugging
         return test_case_df
 
         
@@ -374,7 +434,7 @@ def render_test_runner(creds, agent_details):
     
     col_filter1, col_filter2 = st.columns(2)
     with col_filter1:
-        selected_flows = st.multiselect("Filters by Start Flow", options=flow_options)
+        selected_flows = st.multiselect("Filter by Flow (Any Touched)", options=flow_options)
     with col_filter2:
         selected_tags = st.multiselect("Filter by Tags", options=available_tags)
     

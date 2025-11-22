@@ -7,6 +7,7 @@ from google.cloud import dialogflowcx_v3
 from cxlint.cxlint import CxLint
 import io
 from contextlib import redirect_stdout
+import pandas as pd
 from rich.markup import escape
 from cxlint.rules.logger import RulesLogger
 # Monkeypatch generic_logger to escape markup in display names
@@ -220,6 +221,121 @@ def patched_page_naming_convention(self, page, stats):
 
 PageRules.page_naming_convention = patched_page_naming_convention
 
+def parse_cxlint_report(report_content):
+    """
+    Parses the raw text report from CXLint into structured DataFrames.
+    Returns a dictionary of DataFrames: {'Flows': df, 'Entity Types': df, 'Intents': df, 'Test Cases': df}
+    """
+    data = {
+        'Flows': [],
+        'Entity Types': [],
+        'Intents': [],
+        'Test Cases': []
+    }
+    
+    current_section = None
+    lines = report_content.split('\n')
+    
+    # Regex patterns
+    # Example: R012: Unused Pages : Plans & Features : _Eligibility Check (Single Device)
+    # Format seems to be: RuleID: Description : Flow : Page (for flows)
+    # But it varies by section.
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        if "Begin Flows Directory Linter" in line:
+            current_section = 'Flows'
+            continue
+        elif "Begin Entity Types Directory Linter" in line:
+            current_section = 'Entity Types'
+            continue
+        elif "Begin Intents Directory Linter" in line:
+            current_section = 'Intents'
+            continue
+        elif "Begin Test Cases Directory Linter" in line:
+            current_section = 'Test Cases'
+            continue
+        elif "Linting Agent" in line or "issues found out of" in line or "rated at" in line or "Flow:" in line:
+            # Skip headers/footers/summaries
+            # Note: "Flow: Default Start Flow" lines are just separators/headers in the text output, 
+            # but the actual issues have the flow name in them usually.
+            continue
+            
+        if current_section and line.startswith('R'):
+            parts = [p.strip() for p in line.split(':', 3)]
+            # parts[0] = RuleID (e.g. R012)
+            # parts[1] = Description (e.g. Unused Pages)
+            # parts[2] = Resource Name / Flow (e.g. Plans & Features)
+            # parts[3] = Details / Page (e.g. _Eligibility Check...)
+            
+            if len(parts) >= 3:
+                rule_id = parts[0]
+                description = parts[1]
+                
+                if current_section == 'Flows':
+                    # R012: Unused Pages : Plans & Features : _Eligibility Check
+                    # Flow is parts[2], Page/Details is parts[3] if exists
+                    flow = parts[2]
+                    details = parts[3] if len(parts) > 3 else ""
+                    data['Flows'].append({
+                        'Rule ID': rule_id,
+                        'Description': description,
+                        'Flow': flow,
+                        'Details': details,
+                        'Original': line
+                    })
+                    
+                elif current_section == 'Entity Types':
+                    # R009: Yes/No Entities Present in Agent : confirmation_yes_no : en : Entity : yes
+                    # This one splits differently.
+                    # Let's just capture the raw parts for now or try to be smart.
+                    # parts[2] is usually the Entity Type name
+                    entity_type = parts[2]
+                    details = parts[3] if len(parts) > 3 else ""
+                    data['Entity Types'].append({
+                        'Rule ID': rule_id,
+                        'Description': description,
+                        'Entity Type': entity_type,
+                        'Details': details,
+                        'Original': line
+                    })
+                    
+                elif current_section == 'Intents':
+                    # R005: Intent Does Not Have Minimum Training Phrases. : pmt_consolidate_nfl_pmts : en : (17 / 20)
+                    intent = parts[2]
+                    details = parts[3] if len(parts) > 3 else ""
+                    data['Intents'].append({
+                        'Rule ID': rule_id,
+                        'Description': description,
+                        'Intent': intent,
+                        'Details': details,
+                        'Original': line
+                    })
+                    
+                elif current_section == 'Test Cases':
+                    # R007: Explicit Training Phrase Not in Test Case : DEF.CCSMATRIX-1286... : [Utterance: ... | Intent: ...]
+                    test_case = parts[2]
+                    details = parts[3] if len(parts) > 3 else ""
+                    data['Test Cases'].append({
+                        'Rule ID': rule_id,
+                        'Description': description,
+                        'Test Case': test_case,
+                        'Details': details,
+                        'Original': line
+                    })
+
+    dfs = {}
+    for section, rows in data.items():
+        if rows:
+            dfs[section] = pd.DataFrame(rows)
+        else:
+            dfs[section] = pd.DataFrame()
+            
+    return dfs
+
 def export_and_extract_agent(credentials, agent_name):
     """Exports the agent from DFCX and extracts it to a temp directory."""
     client = dialogflowcx_v3.AgentsClient(credentials=credentials)
@@ -264,7 +380,6 @@ def render_linter(credentials, agent_details):
                 output_file = os.path.join(temp_dir, "cxlint_report.txt")
                 
                 # Initialize CxLint
-                # We might need to suppress stdout if it prints directly
                 linter = CxLint(
                     agent_id=agent_details['display_name'],
                     output_file=output_file,
@@ -279,7 +394,11 @@ def render_linter(credentials, agent_details):
                     with open(output_file, "r") as f:
                         report_content = f.read()
                     
-                    st.text_area("Lint Report", report_content, height=400)
+                    # Parse and display
+                    dfs = parse_cxlint_report(report_content)
+                    st.session_state['cxlint_results'] = dfs
+                    st.session_state['cxlint_report_content'] = report_content
+                    
                 else:
                     st.warning("No report file generated. Check logs.")
                     
@@ -289,3 +408,54 @@ def render_linter(credentials, agent_details):
         except Exception as e:
             st.error(f"Error running cxlint: {e}")
             st.exception(e)
+
+    # Render results if they exist in session state
+    if 'cxlint_results' in st.session_state:
+        dfs = st.session_state['cxlint_results']
+        report_content = st.session_state.get('cxlint_report_content', "")
+        
+        # Tabs for sections
+        tabs = st.tabs(["Flows", "Entity Types", "Intents", "Test Cases", "Raw Report"])
+        
+        with tabs[0]:
+            st.markdown("### Flow Issues")
+            df_flows = dfs.get('Flows', pd.DataFrame())
+            if not df_flows.empty:
+                # Filter by Flow
+                all_flows = sorted(df_flows['Flow'].unique())
+                selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
+                
+                if selected_flows:
+                    filtered_df = df_flows[df_flows['Flow'].isin(selected_flows)]
+                    st.dataframe(filtered_df, use_container_width=True)
+                else:
+                    st.info("Select flows to view issues.")
+            else:
+                st.success("No Flow issues found.")
+                
+        with tabs[1]:
+            st.markdown("### Entity Type Issues")
+            df_et = dfs.get('Entity Types', pd.DataFrame())
+            if not df_et.empty:
+                st.dataframe(df_et, use_container_width=True)
+            else:
+                st.success("No Entity Type issues found.")
+                
+        with tabs[2]:
+            st.markdown("### Intent Issues")
+            df_intents = dfs.get('Intents', pd.DataFrame())
+            if not df_intents.empty:
+                st.dataframe(df_intents, use_container_width=True)
+            else:
+                st.success("No Intent issues found.")
+                
+        with tabs[3]:
+            st.markdown("### Test Case Issues")
+            df_tc = dfs.get('Test Cases', pd.DataFrame())
+            if not df_tc.empty:
+                st.dataframe(df_tc, use_container_width=True)
+            else:
+                st.success("No Test Case issues found.")
+                
+        with tabs[4]:
+            st.text_area("Raw Lint Report", report_content, height=400)
