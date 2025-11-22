@@ -416,7 +416,7 @@ def render_graph_linter(credentials, agent_details):
     if st.button("Run Graph Analysis"):
         try:
             agent_name = agent_details['name']
-            temp_dir = linter.export_and_extract_agent(credentials, agent_name)
+            temp_dir = linter.export_and_extract_agent(credentials, agent_details)
             st.success("Agent exported successfully.")
             
             with st.spinner("Analyzing Agent Graph..."):
@@ -450,10 +450,10 @@ def render_graph_linter(credentials, agent_details):
                 
                 if selected_flows:
                     filtered_df = df[df['Flow'].isin(selected_flows)]
-                    st.dataframe(filtered_df, use_container_width=True)
+                    st.dataframe(filtered_df, width='stretch')
                 else:
                     st.info("Select flows to view issues.")
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
         else:
             st.success("No graph issues found!")

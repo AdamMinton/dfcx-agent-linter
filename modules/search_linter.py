@@ -178,7 +178,7 @@ def render_search_linter(credentials, agent_details):
             
         try:
             agent_name = agent_details['name']
-            temp_dir = linter.export_and_extract_agent(credentials, agent_name)
+            temp_dir = linter.export_and_extract_agent(credentials, agent_details)
             
             with st.spinner("Searching..."):
                 searcher = AgentSearcher(temp_dir)
@@ -186,7 +186,7 @@ def render_search_linter(credentials, agent_details):
                 
             if not df.empty:
                 st.success(f"Found {len(df)} matches.")
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
             else:
                 st.info("No matches found.")
                 

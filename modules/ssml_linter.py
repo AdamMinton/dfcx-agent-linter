@@ -170,7 +170,7 @@ def render_ssml_linter(credentials, agent_details):
             agent_name = agent_details['name']
             
             # Reuse export logic
-            temp_dir = linter.export_and_extract_agent(credentials, agent_name)
+            temp_dir = linter.export_and_extract_agent(credentials, agent_details)
             st.success("Agent exported successfully.")
             
             with st.spinner("Validating SSML..."):
@@ -211,7 +211,7 @@ def render_ssml_linter(credentials, agent_details):
             
             if selected_flows:
                 filtered_df = df[df['Flow'].isin(selected_flows)]
-                st.dataframe(filtered_df, use_container_width=True)
+                st.dataframe(filtered_df, width='stretch')
             else:
                 st.info("Select flows to view issues.")
                 

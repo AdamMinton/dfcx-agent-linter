@@ -336,9 +336,17 @@ def parse_cxlint_report(report_content):
             
     return dfs
 
-def export_and_extract_agent(credentials, agent_name):
+def export_and_extract_agent(credentials, agent_details):
     """Exports the agent from DFCX and extracts it to a temp directory."""
-    client = dialogflowcx_v3.AgentsClient(credentials=credentials)
+    agent_name = agent_details['name']
+    location = agent_details['location']
+    
+    client_options = None
+    if location != "global":
+        api_endpoint = f"{location}-dialogflow.googleapis.com:443"
+        client_options = {"api_endpoint": api_endpoint}
+        
+    client = dialogflowcx_v3.AgentsClient(credentials=credentials, client_options=client_options)
     request = dialogflowcx_v3.ExportAgentRequest(
         name=agent_name,
         data_format=dialogflowcx_v3.ExportAgentRequest.DataFormat.JSON_PACKAGE
@@ -371,7 +379,7 @@ def render_linter(credentials, agent_details):
             agent_name = agent_details['name']
             
             # 1. Export Agent
-            temp_dir = export_and_extract_agent(credentials, agent_name)
+            temp_dir = export_and_extract_agent(credentials, agent_details)
             st.success(f"Agent exported to temporary directory.")
             
             # 2. Run CXLint
@@ -427,7 +435,7 @@ def render_linter(credentials, agent_details):
                 
                 if selected_flows:
                     filtered_df = df_flows[df_flows['Flow'].isin(selected_flows)]
-                    st.dataframe(filtered_df, use_container_width=True)
+                    st.dataframe(filtered_df, width='stretch')
                 else:
                     st.info("Select flows to view issues.")
             else:
@@ -437,7 +445,7 @@ def render_linter(credentials, agent_details):
             st.markdown("### Entity Type Issues")
             df_et = dfs.get('Entity Types', pd.DataFrame())
             if not df_et.empty:
-                st.dataframe(df_et, use_container_width=True)
+                st.dataframe(df_et, width='stretch')
             else:
                 st.success("No Entity Type issues found.")
                 
@@ -445,7 +453,7 @@ def render_linter(credentials, agent_details):
             st.markdown("### Intent Issues")
             df_intents = dfs.get('Intents', pd.DataFrame())
             if not df_intents.empty:
-                st.dataframe(df_intents, use_container_width=True)
+                st.dataframe(df_intents, width='stretch')
             else:
                 st.success("No Intent issues found.")
                 
@@ -453,7 +461,7 @@ def render_linter(credentials, agent_details):
             st.markdown("### Test Case Issues")
             df_tc = dfs.get('Test Cases', pd.DataFrame())
             if not df_tc.empty:
-                st.dataframe(df_tc, use_container_width=True)
+                st.dataframe(df_tc, width='stretch')
             else:
                 st.success("No Test Case issues found.")
                 
