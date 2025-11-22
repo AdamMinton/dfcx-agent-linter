@@ -19,14 +19,12 @@ def main():
     st.sidebar.success(f"Authenticated as: {project_id}")
     
     # Agent Selection
-    st.header("1. Select Agent")
     agent_details = selector.render_selector(creds, project_id)
     
     if agent_details:
         st.success(f"Selected Agent: {agent_details['display_name']}")
         
         # Modules Area
-        st.header("2. Run Modules")
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["CXLint", "SSML Checker", "Graph Linter", "Search", "Test Runner"])
         

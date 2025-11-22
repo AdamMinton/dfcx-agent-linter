@@ -157,7 +157,7 @@ class AgentSearcher:
 
 
 def render_search_linter(credentials, agent_details):
-    st.subheader(f"Search Agent: {agent_details['display_name']}")
+    st.markdown("Search for specific strings or patterns across the agent's flows, pages, routes, and fulfillment.")
     
     col1, col2 = st.columns([3, 1])
     with col1:

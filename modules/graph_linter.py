@@ -411,7 +411,7 @@ class OfflineFlowGraph:
                         )
 
 def render_graph_linter(credentials, agent_details):
-    st.subheader(f"Graph Linter for: {agent_details['display_name']}")
+    st.markdown("Analyze the agent's graph structure to find unreachable pages, stuck pages, missing event handlers, and unused route groups.")
     
     if st.button("Run Graph Analysis"):
         try:

@@ -29,16 +29,15 @@ def list_agents(credentials, project_id, location="global"):
         return []
 
 def render_selector(credentials, project_id):
-    """Renders the agent selection widgets."""
+    """Renders the agent selection widgets in the sidebar."""
     
-    col1, col2 = st.columns(2)
+    st.sidebar.header("Agent Selection")
     
-    with col1:
-        location = st.selectbox(
-            "Select Location",
-            ["global", "us-central1", "us-east1", "us-west1", "australia-southeast1", "europe-west1", "europe-west2", "asia-northeast1"],
-            index=0
-        )
+    location = st.sidebar.selectbox(
+        "Select Location",
+        ["global", "us-central1", "us-east1", "us-west1", "australia-southeast1", "europe-west1", "europe-west2", "asia-northeast1"],
+        index=0
+    )
     
     if project_id and location:
         with st.spinner(f"Fetching agents from {project_id}/{location}..."):
@@ -46,12 +45,40 @@ def render_selector(credentials, project_id):
             
         if agents:
             agent_names = [a["display_name"] for a in agents]
-            selected_agent_name = st.selectbox("Select Agent", agent_names)
+            selected_agent_name = st.sidebar.selectbox("Select Agent", agent_names)
             
             # Find the full agent object
             selected_agent = next((a for a in agents if a["display_name"] == selected_agent_name), None)
+
+            # Check if agent has changed
+            if "last_selected_agent_name" not in st.session_state:
+                st.session_state["last_selected_agent_name"] = None
+            
+            current_agent_name = selected_agent["name"] if selected_agent else None
+            
+            if current_agent_name != st.session_state["last_selected_agent_name"]:
+                # Clear results from other modules
+                keys_to_clear = [
+                    "cxlint_results",
+                    "cxlint_report_content",
+                    "ssml_issues",
+                    "graph_issues",
+                    "test_runner_result",
+                    "test_runner_df",
+                    "flows_map",
+                    "available_tags"
+                ]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                st.session_state["last_selected_agent_name"] = current_agent_name
+                # Rerun to reflect cleared state immediately if needed, but usually Streamlit handles this on next interaction.
+                # However, since we are inside the render loop, the downstream modules will check session state.
+                # If we just cleared it, they will see empty state, which is what we want.
+
             return selected_agent
         else:
-            st.warning("No agents found in this location.")
+            st.sidebar.warning("No agents found in this location.")
             return None
     return None

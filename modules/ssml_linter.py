@@ -163,7 +163,7 @@ def process_agent_files(temp_dir):
     return issues
 
 def render_ssml_linter(credentials, agent_details):
-    st.subheader(f"SSML Validator for: {agent_details['display_name']}")
+    st.markdown("Validate SSML tags in agent responses to ensure XML correctness and prevent runtime errors.")
     
     if st.button("Run SSML Validation"):
         try:

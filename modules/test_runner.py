@@ -388,7 +388,7 @@ class CxTestCasesHelper:
         return test_guid, test_case_results_df
 
 def render_test_runner(creds, agent_details):
-    st.header("Test Runner")
+    st.markdown("Run and analyze test cases with advanced filtering options, including deep flow filtering and tag filtering.")
     
     if not creds:
         st.warning("Credentials not available.")

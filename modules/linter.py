@@ -364,7 +364,7 @@ def export_and_extract_agent(credentials, agent_name):
 
 def render_linter(credentials, agent_details):
     """Renders the cxlint runner and results."""
-    st.subheader(f"Linting Agent: {agent_details['display_name']}")
+    st.markdown("Run `cxlint` to identify common issues such as naming convention violations, missing training phrases, and more.")
     
     if st.button("Run CXLint"):
         try:
