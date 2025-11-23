@@ -60,6 +60,13 @@ class CxTestCasesHelper:
             self.dfcx_f.client_options = client_options
             self.dfcx_i.client_options = client_options
             self.dfcx_a.client_options = client_options
+        else:
+            # Explicitly set to None for global to avoid AttributeError later
+            self.dfcx_tc.client_options = None
+            self.dfcx_p.client_options = None
+            self.dfcx_f.client_options = None
+            self.dfcx_i.client_options = None
+            self.dfcx_a.client_options = None
 
     def convert_flow(self, flow_id, flows_map):
         if flow_id.split('/')[-1] == '-':
