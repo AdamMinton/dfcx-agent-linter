@@ -20,7 +20,7 @@ steps:
       - 'us-central1'
       - '--allow-unauthenticated' # The app handles auth internally
       - '--set-env-vars'
-      - 'REDIRECT_URI=https://dfcx-linter-app-uc.a.run.app' # Update this after first deploy if URL differs
+      - 'REDIRECT_URI=https://dfcx-linter-app-244644527824.us-central1.run.app' # Updated to match actual Service URL
       # We need to mount the client_secret.json. 
       # For simplicity in this setup, we will assume it's COPY'd in Dockerfile (NOT SECURE for public repos, but ok for private internal)
       # OR better, use Secret Manager. 

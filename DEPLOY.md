@@ -37,7 +37,7 @@ This method builds the container and deploys it to Cloud Run.
     ```
 
 2.  **Post-Deployment Configuration**:
-    *   Get the Service URL from the output (e.g., `https://dfcx-linter-app-uc.a.run.app`).
+    *   Get the Service URL from the output (e.g., `https://dfcx-linter-app-244644527824.us-central1.run.app`).
     *   Go back to **APIs & Services > Credentials** in GCP Console.
     *   Add the Service URL to the **Authorized Redirect URIs** of your OAuth Client.
     *   (Optional) Update the `REDIRECT_URI` environment variable in Cloud Run if it differs from the default logic (though the code currently defaults to localhost or tries to infer, setting it explicitly is safer).
@@ -55,7 +55,7 @@ gcloud run deploy dfcx-linter-app \
   --project att-aam-external \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars REDIRECT_URI=https://dfcx-linter-app-uc.a.run.app
+  --set-env-vars REDIRECT_URI=https://dfcx-linter-app-244644527824.us-central1.run.app
 ```
 
 *Note: We use `--allow-unauthenticated` because the application handles authentication internally via OAuth.*
