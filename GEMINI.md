@@ -43,3 +43,28 @@ When monkeypatching classes in a Streamlit application, special care must be tak
 3.  **Page ID Mapping**:
     -   `dfcx_scrapi.core.pages.Pages.get_pages_map` (and `list_pages`) often excludes the special "Start Page" of a flow.
     -   When building a `Page ID -> Flow Name` map, explicitly add the Start Page (e.g., `.../flows/{flow_id}/pages/Start`) to ensure complete coverage, otherwise test cases landing on the Start Page won't be correctly mapped to the flow.
+
+## Regional Support & `dfcx_scrapi` Quirks
+
+1.  **`TestCases` and `Pages` Initialization**:
+    -   **Issue**: The `TestCases` and `Pages` classes in `dfcx_scrapi` do NOT automatically configure `client_options` (specifically `api_endpoint`) based on the `agent_id` passed to `__init__`. This causes operations on regional agents (e.g., `us-central1`) to fail with 400 errors or "Resource not found" because they default to the global endpoint.
+    -   **Fix**: Manually configure `client_options` after initialization:
+        ```python
+        tc = TestCases(creds=creds, agent_id=agent_id)
+        if location != "global":
+            tc.client_options = tc._set_region(agent_id)
+        ```
+
+2.  **Raw Client Usage**:
+    -   **Issue**: When bypassing `dfcx_scrapi` to use raw `google.cloud.dialogflowcx_v3` clients (e.g., to access `TestCaseView.FULL`), you MUST explicitly pass `client_options` with the correct regional `api_endpoint`.
+    -   **Fix**:
+        ```python
+        client = dialogflowcx_v3.TestCasesClient(
+            credentials=creds,
+            client_options={"api_endpoint": "us-central1-dialogflow.googleapis.com:443"}
+        )
+        ```
+
+3.  **Streamlit Deprecations**:
+    -   **Issue**: `st.dataframe(..., use_container_width=True)` is deprecated.
+    -   **Fix**: Use `width='stretch'` for full width, or `width='content'` for content width.

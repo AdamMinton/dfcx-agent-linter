@@ -39,16 +39,27 @@ def check_limit():
 
 class CxTestCasesHelper:
 
-    def __init__(self, agent_id):
+    def __init__(self, agent_id, creds=None):
         self.agent_project_id = agent_id.split("/")[1]
         self.agent_location_id = agent_id.split("/")[3]
         self.agent_id_full = agent_id
         self.agent_id = agent_id.split("/")[5]
-        self.dfcx_a = Agents()
-        self.dfcx_i = Intents()
-        self.dfcx_f = Flows()
-        self.dfcx_p = Pages()
-        self.dfcx_tc = TestCases()
+        # dfcx_scrapi handles regional endpoints via agent_id for some classes,
+        # but TestCases and Pages need manual client_options configuration.
+        self.dfcx_a = Agents(creds=creds, agent_id=agent_id)
+        self.dfcx_i = Intents(creds=creds, agent_id=agent_id)
+        self.dfcx_f = Flows(creds=creds, agent_id=agent_id)
+        self.dfcx_p = Pages(creds=creds)
+        self.dfcx_tc = TestCases(creds=creds, agent_id=agent_id)
+        
+        # Manually set client_options for regional agents
+        if self.agent_location_id != "global":
+            client_options = self.dfcx_tc._set_region(agent_id)
+            self.dfcx_tc.client_options = client_options
+            self.dfcx_p.client_options = client_options
+            self.dfcx_f.client_options = client_options
+            self.dfcx_i.client_options = client_options
+            self.dfcx_a.client_options = client_options
 
     def convert_flow(self, flow_id, flows_map):
         if flow_id.split('/')[-1] == '-':
@@ -67,7 +78,7 @@ class CxTestCasesHelper:
                     exponential_delay = RETRY_DELAY * (2**i + random.random())
                     print(f'API returned rate limit error. Waiting {exponential_delay} seconds and trying again...')
                     time.sleep(exponential_delay)
-                raise Exception("ERROR: Request failed too many times.")
+            raise Exception("ERROR: Request failed too many times.")
         return wrapped_func
         
     @handle_dfcx_quota
@@ -129,7 +140,10 @@ class CxTestCasesHelper:
             logging.info(f"Built page_to_flow_map with {len(page_to_flow_map)} entries.")
 
         # Use raw client to get FULL view (needed for conversation turns)
-        client = dialogflowcx_v3.TestCasesClient(credentials=self.dfcx_tc.creds)
+        client = dialogflowcx_v3.TestCasesClient(
+            credentials=self.dfcx_tc.creds,
+            client_options=self.dfcx_tc.client_options
+        )
         request = dialogflowcx_v3.ListTestCasesRequest(
             parent=self.agent_id_full,
             view=dialogflowcx_v3.ListTestCasesRequest.TestCaseView.FULL,
@@ -409,12 +423,21 @@ def render_test_runner(creds, agent_details):
         try:
             with st.spinner("Fetching flows and tags..."):
                 # Flows
-                flows_instance = Flows(creds=creds)
+                flows_instance = Flows(creds=creds, agent_id=agent_id)
+                
+                # Tags (requires fetching test cases)
+                tc_instance = TestCases(creds=creds, agent_id=agent_id)
+                
+                # Manually set client_options if regional
+                location = agent_id.split("/")[3]
+                if location != "global":
+                    client_options = tc_instance._set_region(agent_id)
+                    flows_instance.client_options = client_options
+                    tc_instance.client_options = client_options
+                
                 flows_map = flows_instance.get_flows_map(agent_id=agent_id)
                 st.session_state['flows_map'] = flows_map
                 
-                # Tags (requires fetching test cases)
-                tc_instance = TestCases(creds=creds)
                 test_cases = tc_instance.list_test_cases(agent_id=agent_id)
                 all_tags = set()
                 for tc in test_cases:
@@ -442,7 +465,7 @@ def render_test_runner(creds, agent_details):
         status_msg = st.empty()
         status_msg.info("Initializing Test Runner...")
         try:
-            runner = CxTestCasesHelper(agent_id)
+            runner = CxTestCasesHelper(agent_id, creds=creds)
             
             # Pass 0 as None for recency if user didn't set it
             r_days = recency_days if recency_days > 0 else None
