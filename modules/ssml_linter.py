@@ -25,9 +25,6 @@ def validate_ssml(text):
             # If it doesn't start with <speak>, it might just be text. 
             # But if it contains tags, it might be malformed SSML.
             # For now, let's only validate if it starts with <speak>.
-            # Or if the user wants to check for *any* tags in plain text?
-            # The requirement says "checking the agent response for SSML issues".
-            # Let's assume if it has <speak> it must be valid XML.
             return True, None 
             
     except ET.ParseError as e:
@@ -192,8 +189,6 @@ def render_ssml_linter(credentials, agent_details):
             df = pd.DataFrame(issues)
             
             # Extract Flow from Location
-            # Location format: Flow(Flow Name).Page(Page Name)...
-            # We can use regex or simple string splitting if consistent
             import re
             def extract_flow(loc):
                 match = re.search(r"Flow\((.*?)\)", loc)
@@ -205,15 +200,8 @@ def render_ssml_linter(credentials, agent_details):
             cols = ['Flow'] + [c for c in df.columns if c != 'Flow']
             df = df[cols]
             
-            # Filter by Flow
-            all_flows = sorted(df['Flow'].unique())
-            selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
-            
-            if selected_flows:
-                filtered_df = df[df['Flow'].isin(selected_flows)]
-                st.dataframe(filtered_df, width='stretch')
-            else:
-                st.info("Select flows to view issues.")
+            from modules import ui_utils
+            ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
                 
         else:
             st.success("No SSML issues found! (Checked all <speak> blocks)")

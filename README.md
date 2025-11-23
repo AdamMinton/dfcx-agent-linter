@@ -66,12 +66,18 @@ A composable web application built with Streamlit to run automated tests and lin
     pip install -r requirements.txt
     ```
 
-4.  **Run the application:**
+4.  **Set the Project ID (Optional but Recommended):**
+    ```bash
+    export GCP_PROJECT_ID=your-project-id
+    ```
+    *If skipped, you will need to enter the Project ID in the sidebar every time.*
+
+5.  **Run the application:**
     ```bash
     streamlit run app.py
     ```
 
-5.  **Access the app:**
+6.  **Access the app:**
     Open your browser and navigate to `http://localhost:8501`.
 
 ## Deployment to Cloud Run

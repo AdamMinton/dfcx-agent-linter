@@ -16,6 +16,10 @@ def main():
         st.warning("Please authenticate to proceed.")
         return
 
+    if not project_id:
+        st.warning("Please enter a GCP Project ID in the sidebar to proceed.")
+        return
+
     st.sidebar.success(f"Authenticated as: {project_id}")
     
     # Agent Selection

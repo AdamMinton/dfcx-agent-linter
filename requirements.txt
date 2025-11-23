@@ -10,3 +10,4 @@ dfcx-scrapi
 pandas-gbq
 ratelimit
 google-auth-oauthlib
+pylint

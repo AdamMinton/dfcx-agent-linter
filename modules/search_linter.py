@@ -186,7 +186,8 @@ def render_search_linter(credentials, agent_details):
                 
             if not df.empty:
                 st.success(f"Found {len(df)} matches.")
-                st.dataframe(df, width='stretch')
+                from modules import ui_utils
+                ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
             else:
                 st.info("No matches found.")
                 

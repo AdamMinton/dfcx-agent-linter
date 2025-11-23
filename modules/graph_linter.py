@@ -161,7 +161,6 @@ class OfflineFlowGraph:
             for page_id, page_data in self.pages.get(flow_id, {}).items():
                 # Heuristic: If page has form (parameters), it should probably have event handlers
                 # Or if it expects input (intents).
-                # The notebook checked for 'no-input-default' and 'no-match-default'
                 
                 # Check if it's an input page (has intents or form)
                 has_intents = any(r.get("intent") for r in page_data.get("transitionRoutes", []))
@@ -306,7 +305,6 @@ class OfflineFlowGraph:
             input_pages = [] # (page_id, page_name)
             
             # Add Start page if it acts as input or just as a root
-            # The notebook adds 'Start' explicitly.
             input_pages.append(("Start", "Start"))
             
             for page_id, page_data in self.pages.get(flow_id, {}).items():
@@ -372,7 +370,6 @@ class OfflineFlowGraph:
                 target_page_name = self.get_page_display_name(flow_id, target_page_id)
                 
                 # Determine cost
-                # Notebook: "transition_count_increase = 2 if self.has_entry_fulfillment(target_page_id) else 1"
                 cost = 2 if self.has_entry_fulfillment(flow_id, target_page_id) else 1
                 new_count = transition_count + cost
                 
@@ -443,17 +440,7 @@ def render_graph_linter(credentials, agent_details):
             st.warning(f"Found {len(all_issues)} issues.")
             df = pd.DataFrame(all_issues)
             
-            # Filter by Flow
-            if 'Flow' in df.columns:
-                all_flows = sorted(df['Flow'].unique())
-                selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
-                
-                if selected_flows:
-                    filtered_df = df[df['Flow'].isin(selected_flows)]
-                    st.dataframe(filtered_df, width='stretch')
-                else:
-                    st.info("Select flows to view issues.")
-            else:
-                st.dataframe(df, width='stretch')
+            from modules import ui_utils
+            ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
         else:
             st.success("No graph issues found!")

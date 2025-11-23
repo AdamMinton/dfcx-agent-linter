@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-1.  **GCP Project**: Ensure you have a GCP project (e.g., `att-aam-external`).
+1.  **GCP Project**: Ensure you have a GCP project (e.g., `my-gcp-project`).
+    *   (Optional) Set `GCP_PROJECT_ID` environment variable locally or in Cloud Run to pre-fill the project ID.
 2.  **OAuth Client ID**:
     *   Go to **APIs & Services > Credentials**.
     *   Create an **OAuth 2.0 Client ID** (Web application).
@@ -52,7 +53,7 @@ This method builds the container and deploys it to Cloud Run.
 ```bash
 gcloud run deploy dfcx-linter-app \
   --source . \
-  --project att-aam-external \
+  --project <YOUR_PROJECT_ID> \
   --region us-central1 \
   --allow-unauthenticated \
   --set-env-vars REDIRECT_URI=https://dfcx-linter-app-244644527824.us-central1.run.app

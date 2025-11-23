@@ -425,21 +425,10 @@ def render_linter(credentials, agent_details):
         # Tabs for sections
         tabs = st.tabs(["Flows", "Entity Types", "Intents", "Test Cases", "Raw Report"])
         
+        from modules import ui_utils
+        
         with tabs[0]:
-            st.markdown("### Flow Issues")
-            df_flows = dfs.get('Flows', pd.DataFrame())
-            if not df_flows.empty:
-                # Filter by Flow
-                all_flows = sorted(df_flows['Flow'].unique())
-                selected_flows = st.multiselect("Filter by Flow", options=all_flows, default=all_flows)
-                
-                if selected_flows:
-                    filtered_df = df_flows[df_flows['Flow'].isin(selected_flows)]
-                    st.dataframe(filtered_df, width='stretch')
-                else:
-                    st.info("Select flows to view issues.")
-            else:
-                st.success("No Flow issues found.")
+            ui_utils.render_dataframe_with_filter(dfs.get('Flows', pd.DataFrame()), title="Flow Issues")
                 
         with tabs[1]:
             st.markdown("### Entity Type Issues")

@@ -36,7 +36,7 @@ def authenticate():
     # Check if we are already authenticated in the session
     if "credentials" in st.session_state:
         creds = st.session_state["credentials"]
-        project_id = st.session_state.get("project_id", "att-aam-external")
+        project_id = st.session_state.get("project_id", os.environ.get("GCP_PROJECT_ID", ""))
         return creds, project_id
 
     # Check for OAuth Code in Query Params
@@ -83,7 +83,11 @@ def authenticate():
         
         # Allow overriding project_id from sidebar if needed
         if not project_id:
-            project_id = st.sidebar.text_input("Enter GCP Project ID", value="att-aam-external")
+            # Try to get from env var first
+            project_id = os.environ.get("GCP_PROJECT_ID")
+            
+        if not project_id:
+            project_id = st.sidebar.text_input("Enter GCP Project ID", value="")
         
         return credentials, project_id
     except Exception as e:

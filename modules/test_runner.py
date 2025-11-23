@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import random
-import threading
 import logging
-import requests
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -37,6 +35,19 @@ def check_limit():
     ''' Empty function just to check for calls to API '''
     return
 
+def handle_dfcx_quota(func):
+    def wrapped_func(*args, **kwargs):
+        for i in range(MAX_RETRIES):
+            try:
+                check_limit()
+                return func(*args, **kwargs)
+            except ResourceExhausted:
+                exponential_delay = RETRY_DELAY * (2**i + random.random())
+                print(f'API returned rate limit error. Waiting {exponential_delay} seconds and trying again...')
+                time.sleep(exponential_delay)
+        raise Exception("ERROR: Request failed too many times.")
+    return wrapped_func
+
 class CxTestCasesHelper:
 
     def __init__(self, agent_id, creds=None):
@@ -68,25 +79,46 @@ class CxTestCasesHelper:
             self.dfcx_i.client_options = None
             self.dfcx_a.client_options = None
 
+    def _is_test_case_in_flows(self, test_case, flow_filter, flows_map, page_to_flow_map):
+        """Checks if a test case touches any of the flows in the filter."""
+        # 1. Check Start Flow
+        start_flow_name = self.convert_flow(test_case.test_config.flow, flows_map)
+        if start_flow_name in flow_filter:
+            return True
+        
+        # 2. Check Touched Flows (Deep Filter)
+        for turn in test_case.test_case_conversation_turns:
+            if turn.virtual_agent_output and turn.virtual_agent_output.current_page:
+                page_id = turn.virtual_agent_output.current_page.name
+                
+                # If page_id is in our map, we know the flow
+                if page_id in page_to_flow_map:
+                    flow_name = page_to_flow_map[page_id]
+                    if flow_name in flow_filter:
+                        return True
+                
+                # Fallback: Extract flow ID from page ID string
+                if "flows/" in page_id:
+                    try:
+                        parts = page_id.split('/')
+                        if 'flows' in parts:
+                            f_idx = parts.index('flows')
+                            if f_idx + 1 < len(parts):
+                                fid = parts[f_idx+1]
+                                for f_full_id, f_name in flows_map.items():
+                                    if f_full_id.endswith(f"/flows/{fid}"):
+                                        if f_name in flow_filter:
+                                            return True
+                    except Exception:
+                        pass
+        return False
+
     def convert_flow(self, flow_id, flows_map):
         if flow_id.split('/')[-1] == '-':
             return ''
         if flow_id in flows_map.keys():
             return flows_map[flow_id]
         return 'Default Start Flow'
-
-    def handle_dfcx_quota(func):
-        def wrapped_func(*args, **kwargs):
-            for i in range(MAX_RETRIES):
-                try:
-                    check_limit()
-                    return func(*args, **kwargs)
-                except ResourceExhausted:
-                    exponential_delay = RETRY_DELAY * (2**i + random.random())
-                    print(f'API returned rate limit error. Waiting {exponential_delay} seconds and trying again...')
-                    time.sleep(exponential_delay)
-            raise Exception("ERROR: Request failed too many times.")
-        return wrapped_func
         
     @handle_dfcx_quota
     def get_agent(self, agent_id):
@@ -157,6 +189,25 @@ class CxTestCasesHelper:
             page_size=20
         )
         test_cases = client.list_test_cases(request=request)
+        
+        # Filter test cases
+        filtered_test_cases = []
+        for response in test_cases:
+            # Flow Filter Logic
+            if flow_filter:
+                if not self._is_test_case_in_flows(response, flow_filter, flows_map, page_to_flow_map):
+                    continue
+            
+            # Filter by tags
+            if tag_filter:
+                tc_tags = list(response.tags)
+                if not set(tag_filter).intersection(set(tc_tags)):
+                    continue
+
+            filtered_test_cases.append(response)
+        
+        test_cases = filtered_test_cases
+        
         retest = []
         retest_names = []
         results = {}
@@ -173,87 +224,6 @@ class CxTestCasesHelper:
         passed = []
         not_runnable = []
         deep_links = []
-
-        # Filter test cases first if flow_filter is provided
-        filtered_test_cases = []
-        
-        # Convert test_cases generator to list if needed, or iterate
-        # list_test_cases returns a List usually
-        
-        for response in test_cases:
-            # Flow Filter Logic
-            if flow_filter:
-                include_tc = False
-                
-                # 1. Check Start Flow
-                start_flow_name = self.convert_flow(response.test_config.flow, flows_map)
-                if start_flow_name in flow_filter:
-                    include_tc = True
-                
-                # 2. Check Touched Flows (Deep Filter)
-                if not include_tc:
-                    # Check conversation turns
-                    for turn in response.test_case_conversation_turns:
-                        # Check virtual agent output for current page
-                        if turn.virtual_agent_output and turn.virtual_agent_output.current_page:
-                            page_id = turn.virtual_agent_output.current_page.name
-                            # page_id is full resource name usually
-                            # But get_pages_map usually returns full resource name as key?
-                            # Let's check if we can match it
-                            
-                            # If page_id is in our map, we know the flow
-                            if page_id in page_to_flow_map:
-                                flow_name = page_to_flow_map[page_id]
-                                if flow_name in flow_filter:
-                                    include_tc = True
-                                    break
-                            
-                            # Also check if it's a Flow ID directly (Start Page)
-                            # Sometimes current_page might be the flow start? 
-                            # Actually current_page.name is usually the page resource name.
-                            # If it's the start page, it might be just the flow ID or end with /pages/Start
-                            
-                            # If we can't find it in map, maybe it's a flow start page?
-                            # Flow start page doesn't always show up in get_pages_map
-                            # But usually we can infer flow from the page ID structure?
-                            # projects/.../flows/{flow_id}/pages/{page_id}
-                            # We can extract flow_id from the string
-                            if "flows/" in page_id:
-                                try:
-                                    # Extract flow id
-                                    # .../flows/FLOW_ID/pages/...
-                                    parts = page_id.split('/')
-                                    if 'flows' in parts:
-                                        f_idx = parts.index('flows')
-                                        if f_idx + 1 < len(parts):
-                                            fid = parts[f_idx+1]
-                                            # Reconstruct full flow ID or just match by suffix?
-                                            # flows_map keys are usually full IDs
-                                            # Let's try to find the flow in flows_map
-                                            found_flow = False
-                                            for f_full_id, f_name in flows_map.items():
-                                                if f_full_id.endswith(f"/flows/{fid}"):
-                                                    if f_name in flow_filter:
-                                                        include_tc = True
-                                                        found_flow = True
-                                                    break
-                                            if found_flow:
-                                                break
-                                except:
-                                    pass
-
-                if not include_tc:
-                    continue
-            
-            # Filter by tags
-            if tag_filter:
-                tc_tags = list(response.tags)
-                if not set(tag_filter).intersection(set(tc_tags)):
-                    continue
-
-            filtered_test_cases.append(response)
-        
-        test_cases = filtered_test_cases
 
         for response in test_cases:
             #print(response)
