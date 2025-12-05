@@ -372,7 +372,7 @@ def export_and_extract_agent(credentials, agent_details):
 
 def render_linter(credentials, agent_details):
     """Renders the cxlint runner and results."""
-    st.markdown("Run `cxlint` to identify common issues such as naming convention violations, missing training phrases, and more.")
+    st.markdown("Run `cxlint` to identify common issues such as naming convention violations, missing training phrases, and more.  \n\nFor a detailed explanation of all rules, see the [CXLint Rules Documentation](https://github.com/GoogleCloudPlatform/cxlint/blob/main/docs/RULES.md).")
     
     if st.button("Run CXLint"):
         try:
