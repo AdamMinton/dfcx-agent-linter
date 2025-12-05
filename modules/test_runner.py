@@ -45,7 +45,7 @@ def handle_dfcx_quota(func):
                 exponential_delay = RETRY_DELAY * (2**i + random.random())
                 print(f'API returned rate limit error. Waiting {exponential_delay} seconds and trying again...')
                 time.sleep(exponential_delay)
-        raise Exception("ERROR: Request failed too many times.")
+        raise Exception("⚠️ Rate Limit Exceeded: The Dialogflow CX API quota has been reached. Please wait a moment and try again, or reduce the concurrency limit.")
     return wrapped_func
 
 class CxTestCasesHelper:
@@ -145,7 +145,7 @@ class CxTestCasesHelper:
         return self.dfcx_p.get_page(page_id=page_id)
 
     @handle_dfcx_quota
-    def get_test_case_results(self, retest_all=False, flow_filter=None, tag_filter=None, limit=None, recency_days=None, progress_callback=None):
+    def get_test_case_results(self, retest_all=False, flow_filter=None, tag_filter=None, limit=None, recency_days=None, progress_callback=None, cached_test_cases=None):
         '''
         Fetches test cases and filters them.
         If flow_filter is provided, it checks if the test case touches any of the selected flows.
@@ -178,17 +178,21 @@ class CxTestCasesHelper:
             
             logging.info(f"Built page_to_flow_map with {len(page_to_flow_map)} entries.")
 
-        # Use raw client to get FULL view (needed for conversation turns)
-        client = dialogflowcx_v3.TestCasesClient(
-            credentials=self.dfcx_tc.creds,
-            client_options=self.dfcx_tc.client_options
-        )
-        request = dialogflowcx_v3.ListTestCasesRequest(
-            parent=self.agent_id_full,
-            view=dialogflowcx_v3.ListTestCasesRequest.TestCaseView.FULL,
-            page_size=20
-        )
-        test_cases = client.list_test_cases(request=request)
+        if cached_test_cases:
+            logging.info("Using cached test cases.")
+            test_cases = cached_test_cases
+        else:
+            # Use raw client to get FULL view (needed for conversation turns)
+            client = dialogflowcx_v3.TestCasesClient(
+                credentials=self.dfcx_tc.creds,
+                client_options=self.dfcx_tc.client_options
+            )
+            request = dialogflowcx_v3.ListTestCasesRequest(
+                parent=self.agent_id_full,
+                view=dialogflowcx_v3.ListTestCasesRequest.TestCaseView.FULL,
+                page_size=20
+            )
+            test_cases = client.list_test_cases(request=request)
         
         # Filter test cases
         filtered_test_cases = []
@@ -303,34 +307,20 @@ class CxTestCasesHelper:
             import concurrent.futures
             
             # Helper function for single test execution
+            @handle_dfcx_quota
             def run_single_test(test_case_id):
                 try:
-                    # We need to use the raw client or a method that runs a single test
-                    # dfcx_scrapi's TestCases class has run_test_case?
-                    # Let's check if we can use the batch method with size 1 or if there is a better way.
-                    # Actually, we can use self.dfcx_tc.run_test_case if it exists (we verified it does).
-                    # But wait, run_test_case in dfcx_scrapi might return a LongRunningOperation or the result directly?
-                    # Let's assume we need to wait for the operation if it returns one.
-                    # Looking at standard DFCX API, run_test_case returns an Operation.
-                    # dfcx_scrapi usually handles the LRO waiting in its methods.
-                    
-                    # If dfcx_scrapi.run_test_case returns the result directly (after waiting), great.
-                    # If it returns an LRO, we need to wait.
-                    # Based on typical dfcx_scrapi behavior, it often returns the response object.
-                    
-                    # Let's try to use the batch_run_test_cases with a list of 1 for safety if we are unsure,
-                    # BUT batch_run_test_cases waits for ALL to finish.
-                    # So we really want run_test_case.
-                    
-                    # Re-reading the grep output: "def run_test_case(self, test_case_id: str, environment: str = None):"
-                    # It likely returns the RunTestCaseResponse or Operation.
-                    
                     # Pass the full test case ID as expected by dfcx_scrapi
                     res = self.dfcx_tc.run_test_case(test_case_id=test_case_id)
                     return res
                 except Exception as e:
-                    logging.error(f"Error running test case {test_case_id}: {e}")
-                    return None
+                    # If handle_dfcx_quota re-raises, it will be caught here if we wrap it,
+                    # but handle_dfcx_quota is a decorator, so it wraps THIS function.
+                    # So exceptions from handle_dfcx_quota will propagate out of run_single_test.
+                    # We need to catch them in the future.result() call or wrap the inner logic.
+                    # Actually, let's let the exception propagate so the retry logic works,
+                    # and catch the FINAL exception in the executor loop.
+                    raise e
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Map test case IDs to futures
@@ -341,34 +331,6 @@ class CxTestCasesHelper:
                     try:
                         result = future.result()
                         if result:
-                            # Result is likely a RunTestCaseResponse or similar
-                            # We need to extract the result.
-                            # If it's a batch response (list), we take the first.
-                            # If it's a single response, we use it directly.
-                            
-                            # Note: dfcx_scrapi run_test_case might return the LRO result which is a RunTestCaseResponse
-                            # which has a 'result' field? Or 'test_result'?
-                            # Let's inspect what we get.
-                            # Actually, let's look at how batch handled it:
-                            # response = self.dfcx_tc.batch_run_test_cases(chunk, self.agent_id_full)
-                            # for result in response.results: ...
-                            
-                            # If run_test_case returns a single TestCase result (RunTestCaseResponse),
-                            # it should have .test_result and .test_time
-                            
-                            # Let's assume result is the TestCase object with updated result or the RunTestCaseResponse.
-                            # Actually, the API returns RunTestCaseResponse.
-                            
-                            # We need to be careful about the object structure.
-                            # Let's try to update the dataframe safely.
-                            
-                            # If result has 'result' attribute (RunTestCaseResponse), use it.
-                            # If result is the TestCase object, use last_test_result.
-                            
-                            # For safety, let's assume it returns the RunTestCaseResponse.
-                            # attributes: name, environment, test_result, test_time
-                            
-                            # result is RunTestCaseResponse, which has a 'result' field of type TestCaseResult
                             test_case_result = result.result
                             
                             test_case_df.loc[test_case_df['id'] == tc_id, 'test_result'] = str(test_case_result.test_result)
@@ -381,6 +343,10 @@ class CxTestCasesHelper:
                             
                     except Exception as e:
                         logging.error(f"Exception processing result for {tc_id}: {e}")
+                        # Mark as not runnable / error
+                        test_case_df.loc[test_case_df['id'] == tc_id, 'test_result'] = "ERROR"
+                        test_case_df.loc[test_case_df['id'] == tc_id, 'passed'] = False
+                        test_case_df.loc[test_case_df['id'] == tc_id, 'not_runnable'] = True
                     
                     completed_tests += 1
                     if progress_callback:
@@ -391,7 +357,7 @@ class CxTestCasesHelper:
         return test_case_df
 
         
-    def execute(self, flow_filter=None, tag_filter=None, limit=None, recency_days=None, progress_callback=None):
+    def execute(self, flow_filter=None, tag_filter=None, limit=None, recency_days=None, progress_callback=None, cached_test_cases=None):
         test_guid = uuid.uuid4()
         test_start_time = datetime.now()
 
@@ -411,7 +377,7 @@ class CxTestCasesHelper:
         if progress_callback:
             progress_callback(0.1, "Fetching test cases...")
 
-        test_case_results_df = self.get_test_case_results(retest_all=True, flow_filter=flow_filter, tag_filter=tag_filter, limit=limit, recency_days=recency_days, progress_callback=progress_callback)
+        test_case_results_df = self.get_test_case_results(retest_all=True, flow_filter=flow_filter, tag_filter=tag_filter, limit=limit, recency_days=recency_days, progress_callback=progress_callback, cached_test_cases=cached_test_cases)
 
         test_case_results_df["test_run_guid"] = str(test_guid)
         test_case_results_df["test_run_timestamp"] = test_start_time
@@ -457,17 +423,18 @@ def render_test_runner(creds, agent_details):
         recency_days = st.number_input("Recency Check (Days)", min_value=0, value=0, help="0 to disable recency check")
     
     # Fetch Flows and Tags for Filter
-    if st.button("Fetch Filters Data"):
+    if st.button("Fetch Test Case Data"):
         try:
-            with st.spinner("Fetching flows and tags..."):
+            with st.spinner("Fetching test cases and flows..."):
                 # Flows
                 flows_instance = Flows(creds=creds, agent_id=agent_id)
                 
-                # Tags (requires fetching test cases)
+                # Test Cases
                 tc_instance = TestCases(creds=creds, agent_id=agent_id)
                 
                 # Manually set client_options if regional
                 location = agent_id.split("/")[3]
+                client_options = None
                 if location != "global":
                     client_options = tc_instance._set_region(agent_id)
                     flows_instance.client_options = client_options
@@ -476,17 +443,33 @@ def render_test_runner(creds, agent_details):
                 flows_map = flows_instance.get_flows_map(agent_id=agent_id)
                 st.session_state['flows_map'] = flows_map
                 
-                test_cases = tc_instance.list_test_cases(agent_id=agent_id)
+                # Fetch ALL test cases with FULL view for caching
+                client = dialogflowcx_v3.TestCasesClient(
+                    credentials=tc_instance.creds,
+                    client_options=client_options
+                )
+                request = dialogflowcx_v3.ListTestCasesRequest(
+                    parent=agent_id,
+                    view=dialogflowcx_v3.ListTestCasesRequest.TestCaseView.FULL,
+                    page_size=20
+                )
+                # list_test_cases returns an iterable that handles pagination automatically
+                test_cases_iterable = client.list_test_cases(request=request)
+                
+                # Convert to list to cache it
+                cached_test_cases = list(test_cases_iterable)
+                st.session_state['cached_test_cases'] = cached_test_cases
+                
                 all_tags = set()
-                for tc in test_cases:
+                for tc in cached_test_cases:
                     # tc.tags is a RepeatedScalarContainer, convert to list
                     if tc.tags:
                         all_tags.update(list(tc.tags))
                 st.session_state['available_tags'] = sorted(list(all_tags))
                 
-            st.success("Filters data fetched successfully!")
+            st.success("Test Case Data fetched successfully!")
         except Exception as e:
-            st.error(f"Error fetching filters data: {e}")
+            st.error(f"Error fetching test case data: {e}")
     
     flows_map = st.session_state.get('flows_map', {})
     flow_options = list(flows_map.values()) if flows_map else []
@@ -511,9 +494,12 @@ def render_test_runner(creds, agent_details):
             # Create a progress bar
             progress_bar = st.progress(0, text="Starting tests...")
             
+            # Retrieve cached test cases
+            cached_test_cases = st.session_state.get('cached_test_cases', None)
+            
             # We need to modify execute to support progress callback or we can just fake it if we can't easily modify execute
             # But better to modify execute to accept a callback
-            result, df = runner.execute(flow_filter=selected_flows, tag_filter=selected_tags, limit=limit, recency_days=r_days, progress_callback=lambda p, t: progress_bar.progress(p, text=t))
+            result, df = runner.execute(flow_filter=selected_flows, tag_filter=selected_tags, limit=limit, recency_days=r_days, progress_callback=lambda p, t: progress_bar.progress(p, text=t), cached_test_cases=cached_test_cases)
             
             progress_bar.empty() # Remove progress bar on completion
             status_msg.empty() # Remove status message
