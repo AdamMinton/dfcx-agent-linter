@@ -325,7 +325,8 @@ class CxTestCasesHelper:
                     # Re-reading the grep output: "def run_test_case(self, test_case_id: str, environment: str = None):"
                     # It likely returns the RunTestCaseResponse or Operation.
                     
-                    res = self.dfcx_tc.run_test_case(test_case_id=test_case_id, agent_id=self.agent_id_full)
+                    # Pass the full test case ID as expected by dfcx_scrapi
+                    res = self.dfcx_tc.run_test_case(test_case_id=test_case_id)
                     return res
                 except Exception as e:
                     logging.error(f"Error running test case {test_case_id}: {e}")
@@ -367,20 +368,13 @@ class CxTestCasesHelper:
                             # For safety, let's assume it returns the RunTestCaseResponse.
                             # attributes: name, environment, test_result, test_time
                             
-                            testCaseId_full = result.name # This might be the full path to the result, not the test case?
-                            # The result name format: projects/.../testCases/ID/results/ID
-                            # We need the test case ID.
-                            # "name": "projects/123/locations/global/agents/456/testCases/789/results/abc"
+                            # result is RunTestCaseResponse, which has a 'result' field of type TestCaseResult
+                            test_case_result = result.result
                             
-                            # We can extract test case ID from the input 'tc_id' (which is the full name)
-                            # But we need to match it to the dataframe 'id' column.
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_result'] = str(test_case_result.test_result)
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_time'] = test_case_result.test_time
                             
-                            # tc_id passed to run_single_test is the full test case name.
-                            
-                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_result'] = str(result.test_result)
-                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_time'] = result.test_time
-                            
-                            raw_res = result.test_result
+                            raw_res = test_case_result.test_result
                             is_passed = 'PASSED' in str(raw_res) or raw_res == 1
                             test_case_df.loc[test_case_df['id'] == tc_id, 'passed'] = is_passed
                             test_case_df.loc[test_case_df['id'] == tc_id, 'not_runnable'] = 'UNSPECIFIED' in str(raw_res) or raw_res == 0
