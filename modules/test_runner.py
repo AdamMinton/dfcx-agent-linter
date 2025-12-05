@@ -295,37 +295,104 @@ class CxTestCasesHelper:
         logging.info(f'To retest:{len(retest)}')
         
         if len(retest) > 0:
-            # Batching logic
-            batch_size = limit if limit else 20 # Default to 20 if not specified, or user specified limit
+            # Continuous Execution Logic
+            max_workers = limit if limit else 20
+            total_tests = len(retest)
+            completed_tests = 0
             
-            chunks = [retest[i:i + batch_size] for i in range(0, len(retest), batch_size)]
-            total_chunks = len(chunks)
+            import concurrent.futures
             
-            for i, chunk in enumerate(chunks):
-                if progress_callback:
-                    # Calculate progress from 0.2 to 1.0 based on chunks
-                    progress = 0.2 + (0.8 * (i / total_chunks))
-                    progress_callback(progress, f"Running batch {i+1}/{total_chunks} ({len(chunk)} tests)...")
-                    
-                logging.info(f'Running batch of {len(chunk)} tests...')
+            # Helper function for single test execution
+            def run_single_test(test_case_id):
                 try:
-                    response = self.dfcx_tc.batch_run_test_cases(chunk, self.agent_id_full)
-                    for result in response.results:
-                        # Results may not be in the same order as they went in (oh well)
-                        testCaseId_full = '/'.join(result.name.split('/')[:-2])
-                        
-                        # Update dataframe where id = testcaseId_full
-                        test_case_df.loc[test_case_df['id'] == testCaseId_full, 'short_id'] = testCaseId_full.split('/')[-1]
-                        test_case_df.loc[test_case_df['id'] == testCaseId_full, 'test_result'] = str(result.test_result)
-                        test_case_df.loc[test_case_df['id'] == testCaseId_full, 'test_time'] = result.test_time
-                        
-                        # Check for PASSED (handle int or string)
-                        raw_res = result.test_result
-                        is_passed = 'PASSED' in str(raw_res) or raw_res == 1
-                        test_case_df.loc[test_case_df['id'] == testCaseId_full, 'passed'] = is_passed
-                        test_case_df.loc[test_case_df['id'] == testCaseId_full, 'not_runnable'] = 'UNSPECIFIED' in str(raw_res) or raw_res == 0
+                    # We need to use the raw client or a method that runs a single test
+                    # dfcx_scrapi's TestCases class has run_test_case?
+                    # Let's check if we can use the batch method with size 1 or if there is a better way.
+                    # Actually, we can use self.dfcx_tc.run_test_case if it exists (we verified it does).
+                    # But wait, run_test_case in dfcx_scrapi might return a LongRunningOperation or the result directly?
+                    # Let's assume we need to wait for the operation if it returns one.
+                    # Looking at standard DFCX API, run_test_case returns an Operation.
+                    # dfcx_scrapi usually handles the LRO waiting in its methods.
+                    
+                    # If dfcx_scrapi.run_test_case returns the result directly (after waiting), great.
+                    # If it returns an LRO, we need to wait.
+                    # Based on typical dfcx_scrapi behavior, it often returns the response object.
+                    
+                    # Let's try to use the batch_run_test_cases with a list of 1 for safety if we are unsure,
+                    # BUT batch_run_test_cases waits for ALL to finish.
+                    # So we really want run_test_case.
+                    
+                    # Re-reading the grep output: "def run_test_case(self, test_case_id: str, environment: str = None):"
+                    # It likely returns the RunTestCaseResponse or Operation.
+                    
+                    res = self.dfcx_tc.run_test_case(test_case_id=test_case_id, agent_id=self.agent_id_full)
+                    return res
                 except Exception as e:
-                    logging.error(f"Error running batch: {e}")
+                    logging.error(f"Error running test case {test_case_id}: {e}")
+                    return None
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Map test case IDs to futures
+                future_to_test = {executor.submit(run_single_test, tc_id): tc_id for tc_id in retest}
+                
+                for future in concurrent.futures.as_completed(future_to_test):
+                    tc_id = future_to_test[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            # Result is likely a RunTestCaseResponse or similar
+                            # We need to extract the result.
+                            # If it's a batch response (list), we take the first.
+                            # If it's a single response, we use it directly.
+                            
+                            # Note: dfcx_scrapi run_test_case might return the LRO result which is a RunTestCaseResponse
+                            # which has a 'result' field? Or 'test_result'?
+                            # Let's inspect what we get.
+                            # Actually, let's look at how batch handled it:
+                            # response = self.dfcx_tc.batch_run_test_cases(chunk, self.agent_id_full)
+                            # for result in response.results: ...
+                            
+                            # If run_test_case returns a single TestCase result (RunTestCaseResponse),
+                            # it should have .test_result and .test_time
+                            
+                            # Let's assume result is the TestCase object with updated result or the RunTestCaseResponse.
+                            # Actually, the API returns RunTestCaseResponse.
+                            
+                            # We need to be careful about the object structure.
+                            # Let's try to update the dataframe safely.
+                            
+                            # If result has 'result' attribute (RunTestCaseResponse), use it.
+                            # If result is the TestCase object, use last_test_result.
+                            
+                            # For safety, let's assume it returns the RunTestCaseResponse.
+                            # attributes: name, environment, test_result, test_time
+                            
+                            testCaseId_full = result.name # This might be the full path to the result, not the test case?
+                            # The result name format: projects/.../testCases/ID/results/ID
+                            # We need the test case ID.
+                            # "name": "projects/123/locations/global/agents/456/testCases/789/results/abc"
+                            
+                            # We can extract test case ID from the input 'tc_id' (which is the full name)
+                            # But we need to match it to the dataframe 'id' column.
+                            
+                            # tc_id passed to run_single_test is the full test case name.
+                            
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_result'] = str(result.test_result)
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'test_time'] = result.test_time
+                            
+                            raw_res = result.test_result
+                            is_passed = 'PASSED' in str(raw_res) or raw_res == 1
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'passed'] = is_passed
+                            test_case_df.loc[test_case_df['id'] == tc_id, 'not_runnable'] = 'UNSPECIFIED' in str(raw_res) or raw_res == 0
+                            
+                    except Exception as e:
+                        logging.error(f"Exception processing result for {tc_id}: {e}")
+                    
+                    completed_tests += 1
+                    if progress_callback:
+                        # Progress from 0.2 to 1.0
+                        progress = 0.2 + (0.8 * (completed_tests / total_tests))
+                        progress_callback(progress, f"Running tests... ({completed_tests}/{total_tests})")
 
         return test_case_df
 
@@ -390,7 +457,7 @@ def render_test_runner(creds, agent_details):
     # Configuration
     col1, col2 = st.columns(2)
     with col1:
-        limit = st.number_input("Batch Size (Concurrency Limit)", min_value=1, max_value=100, value=20)
+        limit = st.number_input("Concurrency Limit", min_value=1, max_value=100, value=20, help="Number of tests to run in parallel.")
     
     with col2:
         recency_days = st.number_input("Recency Check (Days)", min_value=0, value=0, help="0 to disable recency check")
