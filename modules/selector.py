@@ -2,7 +2,8 @@ import streamlit as st
 from google.cloud import dialogflowcx_v3
 from google.oauth2 import service_account
 
-def list_agents(credentials, project_id, location="global"):
+@st.cache_data(ttl=600)
+def list_agents(_credentials, project_id, location="global"):
     """Lists DFCX agents in a given project and location."""
     try:
         client_options = None
@@ -10,7 +11,7 @@ def list_agents(credentials, project_id, location="global"):
             api_endpoint = f"{location}-dialogflow.googleapis.com:443"
             client_options = {"api_endpoint": api_endpoint}
 
-        client = dialogflowcx_v3.AgentsClient(credentials=credentials, client_options=client_options)
+        client = dialogflowcx_v3.AgentsClient(credentials=_credentials, client_options=client_options)
         parent = f"projects/{project_id}/locations/{location}"
         
         request = dialogflowcx_v3.ListAgentsRequest(parent=parent)

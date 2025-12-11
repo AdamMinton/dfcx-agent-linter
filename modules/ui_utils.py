@@ -14,7 +14,7 @@ def render_dataframe_with_filter(df: pd.DataFrame, filter_col: str = "Flow", tit
         st.markdown(f"### {title}")
 
     if df.empty:
-        st.success("No issues found.")
+        st.caption("No issues found to display.")
         return
 
     if filter_col and filter_col in df.columns:
@@ -25,6 +25,6 @@ def render_dataframe_with_filter(df: pd.DataFrame, filter_col: str = "Flow", tit
             filtered_df = df[df[filter_col].isin(selected_values)]
             st.dataframe(filtered_df, width='stretch')
         else:
-            st.info(f"Select {filter_col}s to view data.")
+            st.caption(f"Select {filter_col}s to view data.")
     else:
         st.dataframe(df, width='stretch')

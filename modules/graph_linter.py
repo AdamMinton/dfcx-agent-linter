@@ -413,8 +413,8 @@ def render_graph_linter(credentials, agent_details):
     if st.button("Run Graph Analysis"):
         try:
             agent_name = agent_details['name']
+            agent_name = agent_details['name']
             temp_dir = linter.export_and_extract_agent(credentials, agent_details)
-            st.success("Agent exported successfully.")
             
             with st.spinner("Analyzing Agent Graph..."):
                 graph = OfflineFlowGraph(temp_dir)
@@ -437,10 +437,7 @@ def render_graph_linter(credentials, agent_details):
     if 'graph_issues' in st.session_state:
         all_issues = st.session_state['graph_issues']
         if all_issues:
-            st.warning(f"Found {len(all_issues)} issues.")
             df = pd.DataFrame(all_issues)
             
             from modules import ui_utils
             ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
-        else:
-            st.success("No graph issues found!")

@@ -467,7 +467,8 @@ def render_test_runner(creds, agent_details):
                         all_tags.update(list(tc.tags))
                 st.session_state['available_tags'] = sorted(list(all_tags))
                 
-            st.success("Test Case Data fetched successfully!")
+                st.session_state['available_tags'] = sorted(list(all_tags))
+                
         except Exception as e:
             st.error(f"Error fetching test case data: {e}")
     
@@ -505,7 +506,8 @@ def render_test_runner(creds, agent_details):
             status_msg.empty() # Remove status message
             st.session_state['test_runner_result'] = result
             st.session_state['test_runner_df'] = df
-            st.success(f"Tests completed! Run GUID: {result}")
+            st.session_state['test_runner_result'] = result
+            st.session_state['test_runner_df'] = df
                 
         except Exception as e:
             st.error(f"Error running tests: {e}")

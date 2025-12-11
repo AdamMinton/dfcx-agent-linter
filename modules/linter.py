@@ -372,87 +372,109 @@ def export_and_extract_agent(credentials, agent_details):
 
 def render_linter(credentials, agent_details):
     """Renders the cxlint runner and results."""
-    st.markdown("Run `cxlint` to identify common issues such as naming convention violations, missing training phrases, and more.  \n\nFor a detailed explanation of all rules, see the [CXLint Rules Documentation](https://github.com/GoogleCloudPlatform/cxlint/blob/main/docs/RULES.md).")
     
-    if st.button("Run CXLint"):
+    # Create tabs for Linter and Rules
+    tab_linter, tab_rules = st.tabs(["Linter", "Rules Reference"])
+    
+    with tab_rules:
         try:
-            agent_name = agent_details['name']
-            
-            # 1. Export Agent
-            temp_dir = export_and_extract_agent(credentials, agent_details)
-            st.success(f"Agent exported to temporary directory.")
-            
-            # 2. Run CXLint
-            with st.spinner("Running cxlint..."):
-                # Capture output
-                output_file = os.path.join(temp_dir, "cxlint_report.txt")
-                
-                # Initialize CxLint
-                linter = CxLint(
-                    agent_id=agent_details['display_name'],
-                    output_file=output_file,
-                    verbose=True
-                )
-                
-                # Run linting
-                linter.lint_agent(temp_dir)
-                
-                # Read report
-                if os.path.exists(output_file):
-                    with open(output_file, "r") as f:
-                        report_content = f.read()
-                    
-                    # Parse and display
-                    dfs = parse_cxlint_report(report_content)
-                    st.session_state['cxlint_results'] = dfs
-                    st.session_state['cxlint_report_content'] = report_content
-                    
-                else:
-                    st.warning("No report file generated. Check logs.")
-                    
-            # Cleanup
-            shutil.rmtree(temp_dir)
-            
+            # Assuming RULES.md is in the root directory relative to execution
+            rules_path = "RULES.md"
+            if os.path.exists(rules_path):
+                with open(rules_path, "r") as f:
+                    rules_content = f.read()
+                st.markdown(rules_content)
+            else:
+                st.warning("RULES.md file not found in the project root.")
         except Exception as e:
-            st.error(f"Error running cxlint: {e}")
-            st.exception(e)
+            st.error(f"Error reading RULES.md: {e}")
 
-    # Render results if they exist in session state
-    if 'cxlint_results' in st.session_state:
-        dfs = st.session_state['cxlint_results']
-        report_content = st.session_state.get('cxlint_report_content', "")
-        
-        # Tabs for sections
-        tabs = st.tabs(["Flows", "Entity Types", "Intents", "Test Cases", "Raw Report"])
-        
-        from modules import ui_utils
-        
-        with tabs[0]:
-            ui_utils.render_dataframe_with_filter(dfs.get('Flows', pd.DataFrame()), title="Flow Issues")
+    with tab_linter:
+        st.markdown("Run `cxlint` to identify common issues such as naming convention violations, missing training phrases, and more.")
+
+    
+        if st.button("Run CXLint"):
+            try:
+                agent_name = agent_details['name']
                 
-        with tabs[1]:
-            st.markdown("### Entity Type Issues")
-            df_et = dfs.get('Entity Types', pd.DataFrame())
-            if not df_et.empty:
-                st.dataframe(df_et, width='stretch')
-            else:
-                st.success("No Entity Type issues found.")
+                # 1. Export Agent
+                temp_dir = export_and_extract_agent(credentials, agent_details)
+                st.toast("Agent exported to temporary directory.", icon="✅")
                 
-        with tabs[2]:
-            st.markdown("### Intent Issues")
-            df_intents = dfs.get('Intents', pd.DataFrame())
-            if not df_intents.empty:
-                st.dataframe(df_intents, width='stretch')
-            else:
-                st.success("No Intent issues found.")
+                # 2. Run CXLint
+                with st.spinner("Running cxlint..."):
+                    # Capture output
+                    output_file = os.path.join(temp_dir, "cxlint_report.txt")
+                    
+                    # Initialize CxLint
+                    linter = CxLint(
+                        agent_id=agent_details['display_name'],
+                        output_file=output_file,
+                        verbose=True
+                    )
+                    
+                    # Run linting
+                    linter.lint_agent(temp_dir)
+                    
+                    # Read report
+                    if os.path.exists(output_file):
+                        with open(output_file, "r") as f:
+                            report_content = f.read()
+                        
+                        # Parse and display
+                        dfs = parse_cxlint_report(report_content)
+                        st.session_state['cxlint_results'] = dfs
+                        st.session_state['cxlint_report_content'] = report_content
+                        
+                    else:
+                        st.warning("No report file generated. Check logs.")
+                        
+                # Cleanup
+                shutil.rmtree(temp_dir)
                 
-        with tabs[3]:
-            st.markdown("### Test Case Issues")
-            df_tc = dfs.get('Test Cases', pd.DataFrame())
-            if not df_tc.empty:
-                st.dataframe(df_tc, width='stretch')
-            else:
-                st.success("No Test Case issues found.")
-                
-        with tabs[4]:
-            st.text_area("Raw Lint Report", report_content, height=400)
+            except Exception as e:
+                st.error(f"Error running cxlint: {e}")
+                st.exception(e)
+
+        # Render results if they exist in session state
+        # We render this OUTSIDE the button click but INSIDE the Linter tab
+        # The 'with tab_linter:' block ended above, but we want results to appear inside it.
+        # We need to indent this block to be inside 'with tab_linter:'
+        if 'cxlint_results' in st.session_state:
+            dfs = st.session_state['cxlint_results']
+            report_content = st.session_state.get('cxlint_report_content', "")
+            
+            # Tabs for sections
+            tabs = st.tabs(["Flows", "Entity Types", "Intents", "Test Cases", "Raw Report"])
+            
+            from modules import ui_utils
+            
+            with tabs[0]:
+                ui_utils.render_dataframe_with_filter(dfs.get('Flows', pd.DataFrame()), title="Flow Issues")
+                    
+            with tabs[1]:
+                st.markdown("### Entity Type Issues")
+                df_et = dfs.get('Entity Types', pd.DataFrame())
+                if not df_et.empty:
+                    st.dataframe(df_et, width='stretch')
+                else:
+                    st.success("No Entity Type issues found.")
+                    
+            with tabs[2]:
+                st.markdown("### Intent Issues")
+                df_intents = dfs.get('Intents', pd.DataFrame())
+                if not df_intents.empty:
+                    st.dataframe(df_intents, width='stretch')
+                else:
+                    st.success("No Intent issues found.")
+                    
+            with tabs[3]:
+                st.markdown("### Test Case Issues")
+                df_tc = dfs.get('Test Cases', pd.DataFrame())
+                if not df_tc.empty:
+                    st.dataframe(df_tc, width='stretch')
+                else:
+                    st.success("No Test Case issues found.")
+                    
+            with tabs[4]:
+                st.text_area("Raw Lint Report", report_content, height=400)

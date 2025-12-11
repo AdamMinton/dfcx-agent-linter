@@ -168,7 +168,6 @@ def render_ssml_linter(credentials, agent_details):
             
             # Reuse export logic
             temp_dir = linter.export_and_extract_agent(credentials, agent_details)
-            st.success("Agent exported successfully.")
             
             with st.spinner("Validating SSML..."):
                 issues = process_agent_files(temp_dir)
@@ -185,7 +184,6 @@ def render_ssml_linter(credentials, agent_details):
     if 'ssml_issues' in st.session_state:
         issues = st.session_state['ssml_issues']
         if issues:
-            st.error(f"Found {len(issues)} SSML issues!")
             df = pd.DataFrame(issues)
             
             # Extract Flow from Location
@@ -202,6 +200,3 @@ def render_ssml_linter(credentials, agent_details):
             
             from modules import ui_utils
             ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
-                
-        else:
-            st.success("No SSML issues found! (Checked all <speak> blocks)")

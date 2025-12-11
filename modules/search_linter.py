@@ -185,14 +185,20 @@ def render_search_linter(credentials, agent_details):
                 df = searcher.search(query, regex=regex, ignore_case=ignore_case, scope=scope)
                 
             if not df.empty:
-                st.success(f"Found {len(df)} matches.")
-                from modules import ui_utils
-                ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
+                # We also need to persist the dataframe to session state so it survives
+                st.session_state['search_results'] = df
             else:
                 st.info("No matches found.")
+                st.session_state['search_results'] = pd.DataFrame() # Clear results
                 
             shutil.rmtree(temp_dir)
             
         except Exception as e:
             st.error(f"Error: {e}")
             st.exception(e)
+            
+    if 'search_results' in st.session_state:
+        df = st.session_state['search_results']
+        if not df.empty:
+            from modules import ui_utils
+            ui_utils.render_dataframe_with_filter(df, filter_col="Flow")
