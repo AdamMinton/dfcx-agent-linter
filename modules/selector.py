@@ -34,11 +34,54 @@ def render_selector(credentials, project_id):
     
     st.sidebar.header("Agent Selection")
     
+    # Locations
+    locations = ["global", "us-central1", "us-east1", "us-west1", "australia-southeast1", "europe-west1", "europe-west2", "asia-northeast1"]
+    
+    # 1. Handle Location Selection
+    # Initialize from URL if not in session state, or if URL changed?
+    # Actually, we want the widget to drive the URL, and URL to drive defaults.
+    # Streamlit widgets persist state.
+    
+    # Check URL for location default
+    url_location = st.query_params.get("location", "global")
+    if url_location not in locations:
+        url_location = "global"
+        
+    # We can't easily set the 'value' of a selectbox if it's already in session state with a different value
+    # But we can default it if it's NOT in session state.
+    # OR we can force it if we want URL to be truth.
+    # Let's trust session_state if it exists? No, if user pastes a URL, they expect THAT location.
+    # But if they change the dropdown, session_state updates.
+    # We should sync: URL -> Default for Widget. Widget Change -> Update URL.
+    
+    # To make URL the source of truth on first load, we can check if we've "processed" the URL yet?
+    # Or just rely on standard Streamlit flow:
+    # If key is in session_state, it uses that.
+    # We can set the key in session_state before rendering the widget if we want to force it.
+    
+    # Let's try to set default_index based on URL if widget key not in session state?
+    # Actually simpler: just update query params when value changes.
+    # But for "landing" on a URL, we need to read it.
+    
+    try:
+        loc_index = locations.index(url_location)
+    except ValueError:
+        loc_index = 0
+
     location = st.sidebar.selectbox(
         "Select Location",
-        ["global", "us-central1", "us-east1", "us-west1", "australia-southeast1", "europe-west1", "europe-west2", "asia-northeast1"],
-        index=0
+        locations,
+        index=loc_index,
+        key="selected_location"
     )
+    
+    # Sync Location to URL
+    if location != st.query_params.get("location"):
+        st.query_params["location"] = location
+
+    # Sync Project ID to URL (auth might have done it, but let's be safe)
+    if project_id and project_id != st.query_params.get("project_id"):
+        st.query_params["project_id"] = project_id
     
     if project_id and location:
         with st.spinner(f"Fetching agents from {project_id}/{location}..."):
@@ -46,10 +89,36 @@ def render_selector(credentials, project_id):
             
         if agents:
             agent_names = [a["display_name"] for a in agents]
-            selected_agent_name = st.sidebar.selectbox("Select Agent", agent_names)
+            
+            # Check URL for agent (expecting Agent ID now)
+            url_agent_id = st.query_params.get("agent", "")
+            
+            # Find index if possible
+            agent_index = 0
+            if url_agent_id:
+                # Try to match by Agent ID (resource name)
+                matching_agent = next((a for a in agents if a["name"] == url_agent_id), None)
+                if matching_agent:
+                    # If found, find the index of its display name
+                    try:
+                        agent_index = agent_names.index(matching_agent["display_name"])
+                    except ValueError:
+                        agent_index = 0
+            
+            selected_agent_name = st.sidebar.selectbox(
+                "Select Agent", 
+                agent_names, 
+                index=agent_index,
+                key="selected_agent"
+            )
             
             # Find the full agent object
             selected_agent = next((a for a in agents if a["display_name"] == selected_agent_name), None)
+            
+            # Sync Agent ID to URL
+            if selected_agent:
+                if selected_agent["name"] != st.query_params.get("agent"):
+                    st.query_params["agent"] = selected_agent["name"]
 
             # Check if agent has changed
             if "last_selected_agent_name" not in st.session_state:

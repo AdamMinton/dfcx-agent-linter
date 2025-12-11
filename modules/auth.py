@@ -43,6 +43,10 @@ def authenticate():
     if not creds and "code" in st.query_params:
         try:
             code = st.query_params["code"]
+            
+            # Retrieve state to restore params
+            state = st.query_params.get("state")
+            
             flow = Flow.from_client_secrets_file(
                 CLIENT_SECRETS_FILE,
                 scopes=SCOPES,
@@ -52,8 +56,20 @@ def authenticate():
             creds = flow.credentials
             st.session_state["credentials"] = creds
             
-            # Clear the code from the URL
+            # Clear the code/state from the URL
             st.query_params.clear()
+            
+            # Restore params from state if valid
+            if state:
+                import json
+                try:
+                    restored_params = json.loads(state)
+                    # Convert list values to single values if needed, dependent on Streamlit version
+                    # st.query_params updates accept dict.
+                    st.query_params.update(restored_params)
+                except Exception as e:
+                    print(f"Failed to restore state parameters: {e}")
+
             st.rerun()
         except Exception as e:
             st.error(f"Authentication failed during token exchange: {e}")
@@ -67,9 +83,15 @@ def authenticate():
                 scopes=SCOPES,
                 redirect_uri=get_redirect_uri()
             )
-            auth_url, _ = flow.authorization_url(prompt="consent")
             
-            st.sidebar.markdown(f"[Login with Google]({auth_url})")
+            # Capture current params as state
+            import json
+            current_params = dict(st.query_params)
+            state = json.dumps(current_params)
+            
+            auth_url, _ = flow.authorization_url(prompt="consent", state=state)
+            
+            st.sidebar.markdown(f'<a href="{auth_url}" target="_self">Login with Google</a>', unsafe_allow_html=True)
             st.warning("Please log in using the sidebar link to proceed.")
             return None, None
         except Exception as e:
@@ -89,7 +111,9 @@ def authenticate():
     if creds:
         # Initialize project_id in session state if not present
         if "project_id" not in st.session_state:
-            st.session_state["project_id"] = os.environ.get("GCP_PROJECT_ID", "")
+            # Check URL param first, then env var, then empty
+            url_project = st.query_params.get("project_id", "")
+            st.session_state["project_id"] = url_project if url_project else os.environ.get("GCP_PROJECT_ID", "")
             
         # Always show the input field
         project_id = st.sidebar.text_input("Enter GCP Project ID", key="project_id")
