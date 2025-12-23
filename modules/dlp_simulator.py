@@ -79,6 +79,11 @@ def render_dlp_simulator(creds, project_id):
         )
         exception_keys = set(k.strip() for k in exception_keys_str.splitlines() if k.strip())
         
+        
+        # Max Depth Control
+        st.subheader("Simulation Parameters")
+        max_depth = st.number_input("Max Nesting Depth (0 = No Limit)", min_value=0, value=0, help="Stop flattening after this depth and treat the remaining subtree as a single string. Useful for simulating 'clumped' payloads.")
+        
         # Shared inspect config for both modes
         inspect_config = None
         if not inspect_template:
@@ -112,10 +117,9 @@ def render_dlp_simulator(creds, project_id):
         # Actions
         if st.button(f"Run {mode} Analysis"):
             if mode == "JSON Key-Level":
-                 run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys)
+                 run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys, max_depth)
             else:
                  run_general_text_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config)
-
 
         
 def run_general_text_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config):
@@ -177,7 +181,7 @@ def run_general_text_analysis(creds, project_id, text_input, inspect_template, i
     except Exception as e:
         st.error(f"Error calling DLP API: {e}")
 
-def run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys):
+def run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys, max_depth):
     try:
         data = json.loads(text_input)
     except json.JSONDecodeError:
@@ -188,7 +192,7 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
     parent = f"projects/{project_id}"
     
     # Flatten/Walk JSON
-    flat_data = flatten_json(data)
+    flat_data = flatten_json(data, max_depth if max_depth > 0 else None)
     
     results = []
     
@@ -268,15 +272,24 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
     df = pd.DataFrame(results)
     st.dataframe(df, use_container_width=True)
 
-def flatten_json(y):
+def flatten_json(y, max_depth=None):
     out = {}
-    def flatten(x, name=''):
+    def flatten(x, name='', depth=0):
+        # Stop Recursion if max_depth reached
+        if max_depth is not None and depth >= max_depth:
+            key = name[:-1] if name.endswith('.') else name
+            if isinstance(x, (dict, list)):
+                out[key] = json.dumps(x)
+            else:
+                out[key] = x
+            return
+
         if type(x) is dict:
             for a in x:
-                flatten(x[a], name + a + '.')
+                flatten(x[a], name + a + '.', depth + 1)
         elif type(x) is list:
             for i, a in enumerate(x):
-                flatten(a, name + str(i) + '.')
+                flatten(a, name + str(i) + '.', depth + 1)
         else:
             out[name[:-1]] = x
     flatten(y)
