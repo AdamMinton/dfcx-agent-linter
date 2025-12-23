@@ -196,13 +196,12 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
     
     results = []
     
-    # Progress Bar
-    progress_bar = st.progress(0)
-    total_items = len(flat_data)
+    # Prepare for Batch Inspection
+    valid_rows = [] # List of {'key': k, 'value': v, 'original_index': i}
+    results = [None] * len(flat_data) # Pre-allocate results with None
     
     for i, (key, value) in enumerate(flat_data.items()):
         # Check Exception
-        # We check if ANY part of the key path (split by .) is in the exception Keys
         key_parts = key.split(".")
         is_exception = any(part in exception_keys for part in key_parts)
         
@@ -210,67 +209,115 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
         findings_summary = "None"
         redacted_value = ""
         
-        if is_exception:
-            status = "Skipped (Exception)"
-        elif not isinstance(value, (str, int, float)):
-             status = "Skipped (Non-String)"
-        else:
-            # Inspect
-            try:
-                # Ensure value is string for inspection
-                value_to_inspect = str(value)
-                item = {"value": value_to_inspect}
-                inspect_kwargs = {}
-                if inspect_template:
-                    inspect_kwargs["inspect_template_name"] = inspect_template
-                else:
-                    inspect_kwargs["inspect_config"] = inspect_config
-                
-                response = dlp_client.inspect_content(
-                    request={"parent": parent, "item": item, **inspect_kwargs}
-                )
-                
-                if response.result.findings:
-                    findings = [f.info_type.name for f in response.result.findings]
-                    findings_summary = ", ".join(set(findings))
-                    status = "Findings Detected"
-                    
-                    # De-identify Only if Findings Detected
-                    
-                    # Prepare De-identify Kwargs
-                    deid_kwargs = {}
-                    if deidentify_template:
-                        deid_kwargs["deidentify_template_name"] = deidentify_template
-                    else:
-                        deid_kwargs["deidentify_config"] = deid_config
-                    
-                    deid_response = dlp_client.deidentify_content(
-                        request={
-                            "parent": parent,
-                            "item": item,
-                            **deid_kwargs,
-                            **inspect_kwargs
-                        }
-                    )
-                    redacted_value = deid_response.item.value
-
-            except Exception as e:
-                status = f"Error: {str(e)}"
-        
-        row = {
+        row_result = {
             "Key": key,
-            "Value": str(value), # Removed truncation
+            "Value": str(value), 
             "Length": len(str(value)),
             "Status": status,
             "Findings": findings_summary
         }
-        if redacted_value:
-             row["Redacted Value"] = redacted_value
-             
-        results.append(row)
-        progress_bar.progress((i + 1) / total_items)
-        
-    progress_bar.empty()
+
+        if is_exception:
+            row_result["Status"] = "Skipped (Exception)"
+            results[i] = row_result
+        elif not isinstance(value, (str, int, float)):
+             row_result["Status"] = "Skipped (Non-String)"
+             results[i] = row_result
+        else:
+             # Add to batch
+             valid_rows.append({
+                 "original_index": i,
+                 "key": key,
+                 "value": str(value)
+             })
+             # Placeholder in results, will be updated after batch processing
+             results[i] = row_result
+
+    # Batch Execution
+    if valid_rows:
+        try:
+            # Construct Table
+            headers = [{"name": "value"}]
+            # dlp_v2.Table expects rows of specific structure
+            rows = [{"values": [{"string_value": r['value']}]} for r in valid_rows]
+            
+            table_item = {"table": {"headers": headers, "rows": rows}}
+            
+            # Common Kwargs
+            inspect_kwargs = {}
+            if inspect_template:
+                inspect_kwargs["inspect_template_name"] = inspect_template
+            else:
+                inspect_kwargs["inspect_config"] = inspect_config
+
+            deid_kwargs = {}
+            if deidentify_template:
+                deid_kwargs["deidentify_template_name"] = deidentify_template
+            else:
+                deid_kwargs["deidentify_config"] = deid_config
+
+            # 1. Inspect
+            with st.spinner(f"Inspecting {len(valid_rows)} items in batch..."):
+                inspect_response = dlp_client.inspect_content(
+                    request={"parent": parent, "item": table_item, **inspect_kwargs}
+                )
+
+            # Map Findings
+            # Findings location: content_locations[0].record_location.table_location.row_index
+            findings_map = {} # row_index -> set of findings
+            
+            if inspect_response.result.findings:
+                for f in inspect_response.result.findings:
+                    # Row index in the batch table
+                    row_idx = f.location.content_locations[0].record_location.table_location.row_index
+                    if row_idx not in findings_map:
+                        findings_map[row_idx] = set()
+                    findings_map[row_idx].add(f.info_type.name)
+
+            # 2. De-identify (Batch)
+            # We de-identify the entire table. It's efficient and simpler.
+            with st.spinner(f"De-identifying {len(valid_rows)} items in batch..."):
+                deid_response = dlp_client.deidentify_content(
+                    request={
+                        "parent": parent,
+                        "item": table_item,
+                        **deid_kwargs,
+                        **inspect_kwargs
+                    }
+                )
+            
+            transformed_rows = deid_response.item.table.rows
+
+            # Update Results
+            for batch_idx, r in enumerate(valid_rows):
+                orig_idx = r['original_index']
+                
+                # Findings
+                if batch_idx in findings_map:
+                    results[orig_idx]["Status"] = "Findings Detected"
+                    results[orig_idx]["Findings"] = ", ".join(sorted(findings_map[batch_idx]))
+                    
+                    # Redacted Value
+                    # For simple masking, the de-identified value is in the corresponding row/col
+                    if batch_idx < len(transformed_rows):
+                         val = transformed_rows[batch_idx].values[0].string_value
+                         results[orig_idx]["Redacted Value"] = val
+                else:
+                    results[orig_idx]["Status"] = "Inspected"
+                    # Optional: We could show the value even if no findings, but usually user cares when things change.
+                    # If the user wants to see "Inspected" values unchanged, they are already in "Value" col.
+                    # If we used a transformation that changes things even without infoTypes (e.g. bucketing), 
+                    # we would want to show it. But usually redaction is triggered by findings.
+                    # For consistency with previous behavior (redacted only if findings), we leave it empty.
+                    pass
+
+        except Exception as e:
+            st.error(f"Error during batch processing: {e}")
+            # Fallback or just show error for all valid rows
+            for r in valid_rows:
+                results[r['original_index']]["Status"] = f"Batch Error: {str(e)}"
+    
+    # progress_bar references removed as we use st.spinner now
     
     st.subheader("Key-Level Analysis Report")
     df = pd.DataFrame(results)
