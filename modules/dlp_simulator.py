@@ -145,11 +145,11 @@ def render_dlp_simulator(creds, project_id):
                 
                 if selected_statuses:
                     filtered_df = res_df[res_df["Status"].isin(selected_statuses)]
-                    st.dataframe(filtered_df, use_container_width=True)
+                    st.dataframe(filtered_df, width="stretch")
                 else:
                     st.info("No records match the selected filters.")
             else:
-                st.dataframe(res_df, use_container_width=True)
+                st.dataframe(res_df, width="stretch")
 
         
 def run_general_text_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config):
@@ -201,7 +201,7 @@ def run_general_text_analysis(creds, project_id, text_input, inspect_template, i
                     "Likelihood": finding.likelihood.name,
                     "Quote": finding.quote,
                 })
-            st.dataframe(findings_data, use_container_width=True)
+            st.dataframe(findings_data, width="stretch")
         else:
             st.success("No findings detected.")
         
