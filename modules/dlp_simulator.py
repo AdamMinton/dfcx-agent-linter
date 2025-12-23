@@ -67,7 +67,14 @@ def render_dlp_simulator(creds, project_id):
             "TN", "BillsOnID", "productsOnID", "ProvidedSecondaryTn", "Taskcounter", 
             "ProvidedZipCode", "SMSType", "UserProvidedDataUnknown", "VerintID", 
             "AAMIntentFromGDF", "providedIntent", "previousproductline", "from_taskRouter", 
-            "taskList", "ProvidedContactTn", "goal", "ProvidedIDMatchedToBill"
+            "taskList", "ProvidedContactTn", "goal", "ProvidedIDMatchedToBill",
+            # Timestamps
+            "timestamp", "time", "date", "createTime", "updateTime", "startTime", "endTime",
+            "receiveTimestamp", "sentTimestamp", "publishTime",
+            # Metadata
+            "labels", "name", "displayName", "blob_release_version",
+            "completeTime", "flowState", "pageState", "logName",
+            "insertId", "advancedSettings"
         ]
         
         st.subheader("Key Inspection Settings")
@@ -117,9 +124,32 @@ def render_dlp_simulator(creds, project_id):
         # Actions
         if st.button(f"Run {mode} Analysis"):
             if mode == "JSON Key-Level":
-                 run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys, max_depth)
+                 df = run_key_level_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config, exception_keys, max_depth)
+                 st.session_state['dlp_key_results'] = df
+                 st.session_state['dlp_active_mode'] = "JSON Key-Level"
             else:
+                 # General Text analysis still renders directly
                  run_general_text_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config)
+                 st.session_state['dlp_active_mode'] = "General Text" # Clear key results implicitly by mode switch
+
+        # Render Key-Level Results if available and active
+        if st.session_state.get('dlp_active_mode') == "JSON Key-Level" and 'dlp_key_results' in st.session_state:
+            res_df = st.session_state['dlp_key_results']
+            st.subheader("Key-Level Analysis Report")
+            
+            # Status Filter
+            if not res_df.empty and "Status" in res_df.columns:
+                all_statuses = sorted(res_df["Status"].astype(str).unique().tolist())
+                # Use a key for the widget to ensure it doesn't lose state easily
+                selected_statuses = st.multiselect("Filter by Status", options=all_statuses, default=all_statuses, key="dlp_status_filter")
+                
+                if selected_statuses:
+                    filtered_df = res_df[res_df["Status"].isin(selected_statuses)]
+                    st.dataframe(filtered_df, use_container_width=True)
+                else:
+                    st.info("No records match the selected filters.")
+            else:
+                st.dataframe(res_df, use_container_width=True)
 
         
 def run_general_text_analysis(creds, project_id, text_input, inspect_template, inspect_config, deidentify_template, deid_config):
@@ -220,7 +250,7 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
         if is_exception:
             row_result["Status"] = "Skipped (Exception)"
             results[i] = row_result
-        elif not isinstance(value, (str, int, float)):
+        elif not isinstance(value, str):
              row_result["Status"] = "Skipped (Non-String)"
              results[i] = row_result
         else:
@@ -319,9 +349,8 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
     
     # progress_bar references removed as we use st.spinner now
     
-    st.subheader("Key-Level Analysis Report")
-    df = pd.DataFrame(results)
-    st.dataframe(df, use_container_width=True)
+    # Return results for rendering
+    return pd.DataFrame(results)
 
 def flatten_json(y, max_depth=None):
     out = {}
