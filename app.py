@@ -1,5 +1,5 @@
 import streamlit as st
-from modules import auth, selector, linter, ssml_linter, graph_linter, search_linter, test_runner
+from modules import auth, selector, linter, ssml_linter, graph_linter, search_linter, test_runner, dlp_simulator
 
 st.set_page_config(page_title="DFCX Agent Linter", layout="wide")
 
@@ -30,7 +30,7 @@ def main():
         
         # Modules Area
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["CXLint", "SSML Checker", "Graph Linter", "Search", "Test Runner"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["CXLint", "SSML Checker", "Graph Linter", "Search", "Test Runner", "DLP Simulator"])
         
         with tab1:
             linter.render_linter(creds, agent_details)
@@ -46,6 +46,9 @@ def main():
 
         with tab5:
             test_runner.render_test_runner(creds, agent_details)
+            
+        with tab6:
+            dlp_simulator.render_dlp_simulator(creds, project_id)
 
 if __name__ == "__main__":
     main()

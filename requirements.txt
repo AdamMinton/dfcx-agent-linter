@@ -11,3 +11,4 @@ pandas-gbq
 ratelimit
 google-auth-oauthlib
 pylint
+google-cloud-dlp
