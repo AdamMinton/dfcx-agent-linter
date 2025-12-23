@@ -292,12 +292,13 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
                     request={"parent": parent, "item": table_item, **inspect_kwargs}
                 )
 
-            # Map Findings
-            # Findings location: content_locations[0].record_location.table_location.row_index
+            # Map Findings & Collect InfoTypes
             findings_map = {} # row_index -> set of findings
+            found_info_types = set()
             
             if inspect_response.result.findings:
                 for f in inspect_response.result.findings:
+                    found_info_types.add(f.info_type.name)
                     # Row index in the batch table
                     row_idx = f.location.content_locations[0].record_location.table_location.row_index
                     if row_idx not in findings_map:
@@ -305,13 +306,36 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
                     findings_map[row_idx].add(f.info_type.name)
 
             # 2. De-identify (Batch)
-            # We de-identify the entire table. It's efficient and simpler.
             with st.spinner(f"De-identifying {len(valid_rows)} items in batch..."):
+                # Dynamic De-id Config Update
+                # If we are using the default deid_config (no template), we MUST specify the info_types to transform
+                # otherwise DLP transforms nothing. We use the info_types we just found.
+                current_deid_kwargs = deid_kwargs.copy()
+                if not deidentify_template and deid_config and found_info_types:
+                     # Create a specialized config for this run targeting found types
+                     # We construct it fresh to avoid mutating the global default or dealing with deep copies complexity for now
+                     # simple reconstruction of the default masking config with targets
+                     dynamic_deid_config = {
+                        "info_type_transformations": {
+                            "transformations": [
+                                {
+                                    "info_types": [{"name": it} for it in found_info_types],
+                                    "primitive_transformation": {
+                                        "character_mask_config": {
+                                            "masking_character": "*"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                     current_deid_kwargs["deidentify_config"] = dynamic_deid_config
+
                 deid_response = dlp_client.deidentify_content(
                     request={
                         "parent": parent,
                         "item": table_item,
-                        **deid_kwargs,
+                        **current_deid_kwargs,
                         **inspect_kwargs
                     }
                 )
