@@ -202,21 +202,24 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
     
     for i, (key, value) in enumerate(flat_data.items()):
         # Check Exception
-        # We check if the last part of the key (the actual field name) is in exception list
-        field_name = key.split(".")[-1]
+        # We check if ANY part of the key path (split by .) is in the exception Keys
+        key_parts = key.split(".")
+        is_exception = any(part in exception_keys for part in key_parts)
         
         status = "Inspected"
         findings_summary = "None"
         redacted_value = ""
         
-        if field_name in exception_keys:
+        if is_exception:
             status = "Skipped (Exception)"
-        elif not isinstance(value, str):
+        elif not isinstance(value, (str, int, float)):
              status = "Skipped (Non-String)"
         else:
             # Inspect
             try:
-                item = {"value": value}
+                # Ensure value is string for inspection
+                value_to_inspect = str(value)
+                item = {"value": value_to_inspect}
                 inspect_kwargs = {}
                 if inspect_template:
                     inspect_kwargs["inspect_template_name"] = inspect_template
