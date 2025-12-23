@@ -256,7 +256,8 @@ def run_key_level_analysis(creds, project_id, text_input, inspect_template, insp
         
         row = {
             "Key": key,
-            "Value": str(value)[:100] + "..." if len(str(value)) > 100 else value,
+            "Value": str(value), # Removed truncation
+            "Length": len(str(value)),
             "Status": status,
             "Findings": findings_summary
         }
